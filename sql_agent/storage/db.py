@@ -1,0 +1,82 @@
+"""
+Document storage abstraction (MongoDB).
+Adapted from Dataherald's db module.
+"""
+from __future__ import annotations
+
+import logging
+from abc import ABC, abstractmethod
+from typing import Any, Dict, List, Optional
+
+from sql_agent.core.config import Component, System
+
+logger = logging.getLogger(__name__)
+
+
+class StorageBackend(Component, ABC):
+     """Abstract storage backend"""
+
+     def __init__(self, system: System):
+         super().__init__(system)
+
+     @abstractmethod
+     def insert(self, collection: str, data: Dict[str, Any]) -> str:
+         ...
+
+     @abstractmethod
+     def find_one(self, collection: str, query: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+         ...
+
+     @abstractmethod
+     def find(self, collection: str, query: Dict[str, Any]) -> List[Dict[str, Any]]:
+         ...
+
+     @abstractmethod
+     def update(self, collection: str, query: Dict[str, Any], data: Dict[str, Any]) -> bool:
+         ...
+
+     @abstractmethod
+     def delete(self, collection: str, query: Dict[str, Any]) -> bool:
+         ...
+
+
+class MongoStorage(StorageBackend):
+     """MongoDB storage implementation"""
+
+     def __init__(self, system: System):
+         super().__init__(system)
+         import pymongo
+         settings = system.settings
+         self.client = pymongo.MongoClient(settings.db_uri)
+         self.db = self.client[settings.db_name or "sql_agent"]
+         logger.info(f"Connected to MongoDB: {settings.db_name}")
+
+     def insert(self, collection: str, data: Dict[str, Any]) -> str:
+         row = dict(data)
+         result = self.db[collection].insert_one(row)
+         record_id = str(result.inserted_id)
+         self.db[collection].update_one({"_id": result.inserted_id}, {"$set": {"id": record_id}})
+         return record_id
+
+     def find_one(self, collection: str, query: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+         row = self.db[collection].find_one(query)
+         return self._normalize(row) if row else None
+
+     def find(self, collection: str, query: Dict[str, Any]) -> List[Dict[str, Any]]:
+         return [self._normalize(row) for row in self.db[collection].find(query)]
+
+     def update(self, collection: str, query: Dict[str, Any], data: Dict[str, Any]) -> bool:
+         result = self.db[collection].update_one(query, {"$set": data})
+         return result.modified_count > 0
+
+     def delete(self, collection: str, query: Dict[str, Any]) -> bool:
+         result = self.db[collection].delete_one(query)
+         return result.deleted_count > 0
+
+     def _normalize(self, row: Dict[str, Any]) -> Dict[str, Any]:
+         data = dict(row)
+         if "_id" in data:
+             data["_id"] = str(data["_id"])
+         if not data.get("id") and data.get("_id"):
+             data["id"] = data["_id"]
+         return data
