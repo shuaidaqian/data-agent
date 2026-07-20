@@ -133,7 +133,7 @@ services/          # Dataherald 原始多服务参考实现或源码镜像
 - LLM、存储、向量库、评估器等实现不直接写死在业务逻辑里。
 - 后续可以扩展 Claude、Gemini、本地模型、不同向量库和不同文档数据库。
 
-当前需要继续完善的地方是：IoC 注册表目前主要注册了 `LLMBackend`，而 API 中还会实例化 `StorageBackend` 和 `VectorBackend`，因此需要补齐组件注册。
+当前实现已经补齐核心组件注册，`System.instance()` 支持通过环境变量自动实例化 `LLMBackend`、`StorageBackend`、`VectorBackend`、`ContextStore` 和 `Evaluator`，并会校验自定义实现是否符合对应抽象类型。
 
 ### 3. LLM 抽象层
 
@@ -201,7 +201,7 @@ services/          # Dataherald 原始多服务参考实现或源码镜像
 - `FewshotExamplesRetriever`：获取相似 Golden SQL 示例。
 - `GetAdminInstructions`：获取管理员指令。
 
-这层体现了 Agent 的一个关键思想：LLM 不直接访问数据库，而是通过受控工具获取环境信息。
+这层体现了 Agent 的一个关键思想：LLM 不直接访问数据库，而是通过受控工具获取环境信息。当前工具层已经加入 schema 白名单校验，表名和列名必须来自 `SchemaScanner` 扫描得到的 `TableDescription`；`SqlDbQuery` 在执行前也会检查 SQL 中引用的表名，单表查询会额外校验简单列名。当环境缺少 `sql_metadata` 时，会降级使用轻量后备解析，避免核心测试被可选依赖阻断。
 
 ### 6. SQL 与 Schema 层
 
@@ -211,8 +211,9 @@ services/          # Dataherald 原始多服务参考实现或源码镜像
 
 - 获取表和视图。
 - 获取列名、类型、主键、外键。
+- 采集列级样本值、低基数分类值和表行数。
 - 构造 `TableDescription`。
-- 生成类似 `CREATE TABLE` 的 schema 文本。
+- 生成类似 `CREATE TABLE` 的 schema 文本，并追加列样本上下文。
 
 `sql_agent/sql/schema_linking.py` 负责 Schema Linking：
 
@@ -245,7 +246,7 @@ services/          # Dataherald 原始多服务参考实现或源码镜像
 助手：基于上一轮上下文生成 SQL B
 ```
 
-当前模块本身已经实现内存态会话管理，但 API 层还需要进一步接入持久化或全局复用，否则跨请求会话无法真正保留。
+当前模块已经支持内存态会话管理和可选存储后端。API 层使用进程级全局 `System` 和存储化 `ConversationManager`，会将会话写入 `conversations` 集合，因此同一个 `conversation_id` 可以跨请求恢复历史。
 
 ### 8. 自纠错层
 
@@ -328,18 +329,22 @@ pytest -q tests
 - SQL 执行、JOIN、聚合、子查询和三表 JOIN。
 - Schema Linking 和 JOIN 路径发现。
 - ConversationManager 多轮上下文构造。
+- FastAPI `/api/v1/question` + SQLite + MockLLM 端到端链路。
 - Agent 基类、复杂度判断和工具函数。
 - SQL 注入拦截。
+- 工具层 schema 白名单校验。
+- SchemaScanner 列级样本值采集。
 - SQL 自纠错基础校验。
 - 启发式 SQL 质量评估。
+- OpenAI、MongoDB、ChromaDB 真实集成测试骨架。
 
 当前本地测试结果：
 
 ```text
-73 passed, 1 failed
+81 passed, 3 skipped, 2 warnings
 ```
 
-唯一失败点在 `tests/test_agent_base.py::TestAgentBase::test_extract_sql`，原因是 `extract_sql_from_output()` 对一种异常 markdown SQL 代码块格式处理不符合测试预期。
+其中 3 个 skipped 是真实 OpenAI、MongoDB、ChromaDB 集成测试，默认需要设置 `RUN_REAL_INTEGRATIONS=true` 才运行。2 个 warnings 分别来自当前 FastAPI TestClient/httpx 组合的弃用提示，以及当前工作区 `.pytest_cache` 写入权限提示。
 
 不建议直接运行：
 
@@ -349,17 +354,17 @@ pytest -q
 
 因为仓库中包含 `services/engine/dataherald/tests` 原始 Dataherald 测试，它会被一起收集，并可能因为原始项目依赖未安装而失败。
 
+当前环境下全仓库 `pytest -q` 会在收集 `services/engine/dataherald/tests` 时因为缺少原始子项目依赖 `sql_metadata` 而失败；这不属于根目录重构版 `sql_agent` 模块测试范围。
+
 ## 当前工程边界
 
-当前项目已经具备清晰的核心架构和模块化实现，但仍属于原型阶段，主要边界如下：
+当前项目已经具备清晰的核心架构和模块化实现，核心链路也已经从原型占位推进到可测试的端到端实现，但仍有一些生产化边界需要继续收敛：
 
-1. IoC 注册表尚未完整注册 `StorageBackend`、`VectorBackend`、`Evaluator`、`ContextStore` 等组件。
-2. `/api/v1/question` 当前没有真正从存储中加载数据库连接，`connection_uri` 仍需要补齐。
-3. 多轮对话模块本身可用，但 API 层每次请求新建 `ConversationManager`，跨请求历史还没有真正持久化。
-4. Azure OpenAI 分支使用了 `azure_api_version`，但配置类中还需要补充该字段。
-5. SQL 安全目前有危险命令拦截，但工具层对表名、列名还需要基于已扫描 schema 做白名单校验。
-6. Schema 扫描的样本值还没有充分写入列级元数据，列值上下文仍可增强。
-7. LLM、MongoDB、ChromaDB 和 FastAPI `/question` 的真实端到端测试还需要补充。
+1. Azure OpenAI 分支使用了 `azure_api_version`，但配置类中还需要补充该字段。
+2. `SqlDbQuery` 复杂多表查询目前主要校验表名，列级白名单对 alias、聚合表达式、复杂子查询仍采取保守策略，后续可引入更稳定的 SQL AST 解析。
+3. MongoDB 会话存储目前按普通 dict/datetime 写入，后续如果引入更复杂对象，需要统一序列化策略。
+4. 真实 OpenAI、MongoDB、ChromaDB 集成测试已经补充，但默认跳过，需要在具备凭据和外部服务的环境中通过 `RUN_REAL_INTEGRATIONS=true` 显式执行。
+5. 全仓库测试仍受 `services/engine` 原始 Dataherald 子项目依赖影响，需要单独安装该子项目依赖，或配置 pytest 默认只收集根目录重构版测试。
 
 这些边界不影响项目作为学习和展示 Agent 架构的价值，但在面试或简历中应如实表述为“原型系统”和“核心链路重构”，不要包装成完整生产级平台。
 
@@ -399,7 +404,7 @@ pytest -q
 
 > 完整超越 Dataherald 的生产级 NL->SQL 平台。
 
-因为当前项目仍有存储接入、会话持久化、API 端到端测试和安全白名单等工程项需要补齐。
+因为当前项目虽然已经补齐存储接入、会话持久化、API 端到端测试和安全白名单等核心工程项，但真实外部服务验证、复杂 SQL 权限校验和生产级观测治理仍需要继续完善。
 
 ## 推荐学习顺序
 
@@ -416,14 +421,17 @@ pytest -q
 
 优先级较高的工程任务：
 
-- [ ] 补齐 IoC 注册表，支持 `StorageBackend`、`VectorBackend`、`ContextStore`、`Evaluator` 自动实例化。
-- [ ] 修复 `/api/v1/question`，从存储中加载真实数据库连接。
-- [ ] 将 `ConversationManager` 接入全局存储或数据库，实现跨请求多轮会话。
-- [ ] 修复 `extract_sql_from_output()` 的异常 markdown 代码块解析问题。
-- [ ] 增加 SQLite + MockLLM 的 API 端到端测试。
-- [ ] 为工具层表名、列名增加 schema 白名单校验。
-- [ ] 完善 SchemaScanner 的样本值采集和列级上下文写入。
-- [ ] 增加真实 OpenAI、MongoDB、ChromaDB 集成测试。
+- [x] 补齐 IoC 注册表，支持 `StorageBackend`、`VectorBackend`、`ContextStore`、`Evaluator` 自动实例化。
+- [x] 修复 `/api/v1/question`，从存储中加载真实数据库连接。
+- [x] 将 `ConversationManager` 接入全局存储或数据库，实现跨请求多轮会话。
+- [x] 修复 `extract_sql_from_output()` 的异常 markdown 代码块解析问题。
+- [x] 增加 SQLite + MockLLM 的 API 端到端测试。
+- [x] 为工具层表名、列名增加 schema 白名单校验。
+- [x] 完善 SchemaScanner 的样本值采集和列级上下文写入。
+- [x] 增加真实 OpenAI、MongoDB、ChromaDB 集成测试。
+- [ ] 在具备真实凭据和外部服务的环境中执行 OpenAI、MongoDB、ChromaDB 集成测试。
+- [ ] 强化复杂多表 SQL 的 alias、表达式和子查询列级白名单校验。
+- [ ] 统一 MongoDB 会话和复杂对象的序列化策略。
 - [ ] 接入 Langfuse / LangSmith 做 Agent 推理链路追踪。
 - [ ] 接入 Prometheus / Grafana 做服务监控。
 - [ ] 适配更多 LLM 后端，例如 Claude、Gemini、本地模型。
