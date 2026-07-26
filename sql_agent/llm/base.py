@@ -1,8 +1,8 @@
 """
-LLM backend abstraction layer
+LLM 后端抽象层。
 
-Defines the interface for LLM providers.
-Supports OpenAI, Azure OpenAI, and can be extended to other providers.
+定义 LLM 服务提供方接口。
+当前支持 OpenAI、Azure OpenAI，并可扩展到其他模型服务。
 """
 from __future__ import annotations
 
@@ -14,7 +14,7 @@ from sql_agent.core.types import LLMConfig
 
 
 class LLMBackend(Component, ABC):
-     """Abstract LLM backend interface"""
+     """LLM 后端抽象接口"""
 
      def __init__(self, system: System):
          super().__init__(system)
@@ -27,7 +27,7 @@ class LLMBackend(Component, ABC):
          config: Optional[LLMConfig] = None,
          **kwargs: Any,
      ) -> str:
-         """Generate a completion from the LLM"""
+         """调用 LLM 生成回复"""
          ...
 
      @abstractmethod
@@ -37,15 +37,15 @@ class LLMBackend(Component, ABC):
          config: Optional[LLMConfig] = None,
          **kwargs: Any,
      ) -> AsyncIterator[str]:
-         """Stream a completion from the LLM"""
+         """流式调用 LLM 生成回复"""
          ...
 
      @abstractmethod
      def embed(self, texts: List[str]) -> List[List[float]]:
-         """Generate embeddings for the given texts"""
+         """为给定文本生成 embedding"""
          ...
 
      @abstractmethod
      def count_tokens(self, text: str) -> int:
-         """Count the number of tokens in the text"""
+         """统计文本中的 token 数量"""
          ...

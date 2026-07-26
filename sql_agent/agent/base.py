@@ -1,11 +1,11 @@
 """
-Base SQL Agent class.
+SQL Agent 基类。
 
-Provides the foundation for all agent implementations.
-Compared to Dataherald's SQLGenerator base, this version:
-- Decouples from LangChain
-- Defines a clean agent interface
-- Supports multiple agent modes (ReAct, Plan-and-Solve)
+为所有 Agent 实现提供基础抽象。
+相比 Dataherald 的 SQLGenerator 基类，本版本：
+- 与 LangChain 解耦
+- 定义清晰的 Agent 接口
+- 支持多种 Agent 模式（ReAct、Plan-and-Solve）
 """
 from __future__ import annotations
 
@@ -31,7 +31,7 @@ logger = logging.getLogger(__name__)
 
 
 class StepResult:
-     """Result of a single agent step"""
+     """单个 Agent 步骤的执行结果"""
      thought: str
      action: str
      action_input: str
@@ -45,7 +45,7 @@ class StepResult:
 
 
 class AgentResult:
-     """Final result from agent execution"""
+     """Agent 执行后的最终结果"""
      sql: str
      status: str
      steps: List[StepResult]
@@ -69,11 +69,11 @@ class AgentResult:
 
 class SQLAgent(Component, ABC):
      """
-     Abstract base class for all SQL generation agents.
+     所有 SQL 生成 Agent 的抽象基类。
 
-     Subclasses must implement:
-     - generate_sql(): The core SQL generation logic
-     - stream_sql(): Streaming version
+     子类必须实现：
+     - generate_sql(): 核心 SQL 生成逻辑
+     - stream_sql(): 流式生成版本
      """
 
      def __init__(
@@ -98,7 +98,7 @@ class SQLAgent(Component, ABC):
          instructions: Optional[List[Dict[str, str]]] = None,
          metadata: Optional[Dict[str, Any]] = None,
      ) -> AgentResult:
-         """Generate SQL from natural language"""
+         """根据自然语言生成 SQL"""
          ...
 
      @abstractmethod
@@ -112,19 +112,19 @@ class SQLAgent(Component, ABC):
          instructions: Optional[List[Dict[str, str]]] = None,
          metadata: Optional[Dict[str, Any]] = None,
      ):
-         """Stream SQL generation process"""
+         """流式返回 SQL 生成过程"""
          ...
 
      def estimate_complexity(self, prompt: Prompt, table_descriptions: List[TableDescription]) -> str:
          """
-         Estimate the complexity of a NL-to-SQL task.
-         Returns: 'simple', 'medium', or 'complex'
-         Used by AgentSelector to decide which agent mode to use.
+         估算 NL-to-SQL 任务复杂度。
+         返回值为：'simple'、'medium' 或 'complex'。
+         AgentSelector 会使用该结果决定调用哪种 Agent 模式。
          """
          text = prompt.text.lower()
          complexity_score = 0
 
-         # Keywords indicating complexity
+         # 表示查询复杂度的关键词
          complex_keywords = [
              "compare", "对比", "average", "平均", "percentage", "百分比",
              "rank", "排名", "top", "bottom", "trend", "趋势",
@@ -158,7 +158,7 @@ class SQLAgent(Component, ABC):
          return "simple"
 
      def extract_sql_from_output(self, output: str) -> Optional[str]:
-         """Extract SQL from LLM output (handles markdown code blocks)"""
+         """从 LLM 输出中提取 SQL（支持 markdown 代码块）"""
          import re
          sql_block_pattern = r"```(?:sql|SQL)?\s*(.*?)\s*```"
          matches = re.findall(sql_block_pattern, output, re.DOTALL)
@@ -175,7 +175,7 @@ class SQLAgent(Component, ABC):
          return fallback.group(0).strip().rstrip(";") if fallback else None
 
      def truncate_observation(self, observation: str, max_length: int = 2000) -> str:
-         """Truncate long observations"""
+         """截断过长的工具观察结果"""
          if len(observation) > max_length:
              return observation[:max_length] + "... (truncated)"
          return observation

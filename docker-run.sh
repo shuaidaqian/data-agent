@@ -1,9 +1,9 @@
 #!/bin/bash
 
-# Create Docker network
+# 创建 Docker 网络
 docker network create dataherald_network
 
-# Bring up services with Docker Compose
+# 使用 Docker Compose 启动服务
 docker-compose -p dataherald -f services/engine/docker-compose.yml up --build -d
 docker-compose -p dataherald -f services/enterprise/docker-compose.yml up --build -d
 docker-compose -p dataherald -f services/slackbot/docker-compose.yml up --build -d

@@ -1,9 +1,9 @@
 """
-Agent tool definitions.
+Agent 工具定义。
 
-These tools empower the NL-to-SQL agent to interact with the database.
-Each tool is a self-contained function with its own prompt description.
-Compared to Dataherald, these tools are decoupled from LangChain's toolkit pattern.
+这些工具让 NL-to-SQL Agent 能够与数据库交互。
+每个工具都是带有独立提示描述的自包含函数。
+相比 Dataherald，这些工具与 LangChain 的 toolkit 模式解耦。
 """
 from __future__ import annotations
 
@@ -31,7 +31,7 @@ TOP_TABLES = 20
 
 @dataclass
 class ToolResult:
-     """Result of a tool execution"""
+     """工具执行结果"""
      success: bool = True
      output: str = ""
      error: Optional[str] = None
@@ -39,7 +39,7 @@ class ToolResult:
 
 @dataclass
 class ToolDef:
-     """Tool definition for the agent"""
+     """Agent 可用工具定义"""
      name: str
      description: str
      fn: Callable[..., ToolResult]
@@ -48,8 +48,8 @@ class ToolDef:
 
 class AgentToolkit:
      """
-     Collection of tools available to the SQL agent.
-     Decoupled from LangChain, using native Python callables.
+     SQL Agent 可用工具集合。
+     与 LangChain 解耦，直接使用原生 Python 可调用对象。
      """
 
      def __init__(
@@ -70,7 +70,7 @@ class AgentToolkit:
          self._allowed_tables = self._build_schema_index()
 
      def get_tools(self) -> List[ToolDef]:
-         """Returns the list of available tools"""
+         """返回可用工具列表"""
          tools = [
              ToolDef(
                  name="SqlDbQuery",
@@ -125,7 +125,7 @@ class AgentToolkit:
          return tools
 
      def _execute_query(self, query: str, top_k: int = DEFAULT_TOP_K) -> ToolResult:
-         """Execute a SQL query and return results"""
+         """执行 SQL 查询并返回结果"""
          try:
              if "```sql" in query:
                  query = query.replace("```sql", "").replace("```", "")
@@ -139,12 +139,12 @@ class AgentToolkit:
              return ToolResult(success=False, output=f"Error: {str(e)}")
 
      def _get_system_time(self, tool_input: str = "") -> ToolResult:
-         """Get current system time"""
+         """获取当前系统时间"""
          now = datetime.datetime.now()
          return ToolResult(output=f"Current Date and Time: {now.strftime('%Y-%m-%d %H:%M:%S')}")
 
      def _find_relevant_tables(self, user_question: str) -> ToolResult:
-         """Find tables relevant to the user question via embedding similarity"""
+         """通过 embedding 相似度查找与用户问题相关的表"""
          try:
              question_embedding = self.llm_backend.embed([user_question])[0]
              table_representations = []
@@ -157,14 +157,14 @@ class AgentToolkit:
                  rep = f"Table {table.table_name}: [{col_rep}]. {desc}"
                  table_representations.append((table.schema_name, table.table_name, rep))
 
-             # Compute embeddings and similarities
+             # 计算 embedding 和相似度
              docs_embeddings = self.llm_backend.embed([r[2] for r in table_representations])
              similarities = [
                  float(np.dot(question_embedding, de) / (np.linalg.norm(question_embedding) * np.linalg.norm(de)))
                  for de in docs_embeddings
              ]
 
-             # Sort and take top_k
+             # 排序并取 top_k
              ranked = sorted(zip(table_representations, similarities), key=lambda x: x[1], reverse=True)[:TOP_TABLES]
 
              result = ""
@@ -176,7 +176,7 @@ class AgentToolkit:
              return ToolResult(success=False, output=f"Error: {str(e)}")
 
      def _get_table_schema(self, table_names: str) -> ToolResult:
-         """Get schema for specified tables"""
+         """获取指定表的 schema"""
          try:
              names = [n.strip() for n in table_names.split(",")]
              tables = []
@@ -200,7 +200,7 @@ class AgentToolkit:
              return ToolResult(success=False, output=f"Error: {str(e)}")
 
      def _check_entity(self, tool_input: str) -> ToolResult:
-         """Check if an entity exists in a column"""
+         """检查实体值是否存在于指定列中"""
          try:
              schema_part, entity = tool_input.rsplit(",", 1)
              entity = entity.strip()
@@ -218,7 +218,7 @@ class AgentToolkit:
                  return self._schema_denied("列", f"{table_name}.{column_name}")
              table_name = self._full_table_name(table)
 
-             # Try ILIKE first, then fuzzy match on all distinct values
+             # 先尝试 LIKE 匹配，再对所有去重值做模糊匹配
              try:
                  search = f"%{entity.lower()}%"
                  query = f"SELECT DISTINCT {column_name} FROM {table_name} WHERE LOWER({column_name}) LIKE :pat"
@@ -228,7 +228,7 @@ class AgentToolkit:
              except Exception:
                  exact_matches = []
 
-             # Fuzzy match on full distinct values
+             # 对完整去重值进行模糊匹配
              try:
                  query = f"SELECT DISTINCT {column_name} FROM {table_name}"
                  with self.database._engine.connect() as conn:
@@ -260,7 +260,7 @@ class AgentToolkit:
              return ToolResult(success=False, output=f"Error: {str(e)}")
 
      def _get_column_info(self, column_names: str) -> ToolResult:
-         """Get column-level information"""
+         """获取列级信息"""
          try:
              items = column_names.split(", ")
              result = ""
@@ -290,7 +290,7 @@ class AgentToolkit:
              return ToolResult(success=False, output=f"Error: {str(e)}")
 
      def _get_few_shot_examples(self, number_of_samples: str) -> ToolResult:
-         """Retrieve few-shot examples"""
+         """检索 few-shot 示例"""
          try:
              n = int(number_of_samples.strip())
          except ValueError:
@@ -306,7 +306,7 @@ class AgentToolkit:
          return ToolResult(output=result)
 
      def _get_instructions(self, tool_input: str = "") -> ToolResult:
-         """Get admin instructions"""
+         """获取管理员指令"""
          if not self.instructions:
              return ToolResult(output="No instructions available")
          result = "Admin instructions (MUST follow these):\n"

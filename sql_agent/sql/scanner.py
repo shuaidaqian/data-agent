@@ -1,8 +1,8 @@
 """
-Database schema scanner.
+数据库 schema 扫描器。
 
-Discovers table structures, columns, types, and relationships.
-Adapted from Dataherald's db_scanner module.
+发现表结构、列、类型和关系。
+基于 Dataherald 的 db_scanner 模块改造。
 """
 from __future__ import annotations
 
@@ -19,14 +19,14 @@ logger = logging.getLogger(__name__)
 
 
 class SchemaScanner:
-     """Scans database schemas and builds TableDescription objects"""
+     """扫描数据库 schema 并构建 TableDescription 对象"""
 
      def __init__(self, database: SQLDatabase):
          self.database = database
          self._inspector = inspect(database._engine)
 
      def scan_all_tables(self, db_connection_id: str) -> List[TableDescription]:
-         """Scan all tables and views in the database"""
+         """扫描数据库中的所有表和视图"""
          tables = []
          for schema_name in self._inspector.get_schema_names():
              for table_name in self._inspector.get_table_names(schema=schema_name):
@@ -40,7 +40,7 @@ class SchemaScanner:
      def scan_tables(
          self, db_connection_id: str, table_names: List[str]
      ) -> List[TableDescription]:
-         """Scan specific tables"""
+         """扫描指定表"""
          result = []
          for full_name in table_names:
              parts = full_name.split(".")
@@ -56,14 +56,14 @@ class SchemaScanner:
      def _scan_table(
          self, db_connection_id: str, table_name: str, schema_name: Optional[str] = None
      ) -> Optional[TableDescription]:
-         """Scan a single table"""
+         """扫描单张表"""
          try:
              cols = self._inspector.get_columns(table_name, schema=schema_name)
              pk_constraint = self._inspector.get_pk_constraint(table_name, schema=schema_name)
              fk_constraints = self._inspector.get_foreign_keys(table_name, schema=schema_name)
              pk_columns = set(pk_constraint.get("constrained_columns", []))
 
-             # Build FK lookup
+             # 构建外键查找表
              fk_map = {}
              for fk in fk_constraints:
                  for col, ref_col in zip(fk["constrained_columns"], fk["referred_columns"]):
@@ -84,7 +84,7 @@ class SchemaScanner:
              row_count = self._row_count(full_name)
              self._apply_column_samples(full_name, columns)
 
-             # Build DDL-like table schema string
+             # 构建类似 DDL 的表结构文本
              table_schema = f"CREATE TABLE {schema_name + '.' if schema_name else ''}{table_name} (\n"
              col_defs = []
              for col in columns:
@@ -118,7 +118,7 @@ class SchemaScanner:
      def _sample_rows(
          self, full_name: str, columns: List[ColumnMetadata], limit: int = 3
      ) -> List[str]:
-         """Get sample values from a table"""
+         """获取表的样本行"""
          try:
              with self.database._engine.connect() as conn:
                  result = conn.execute(
@@ -132,7 +132,7 @@ class SchemaScanner:
      def _apply_column_samples(
          self, full_name: str, columns: List[ColumnMetadata], limit: int = 20
      ) -> None:
-         """Collect sample values and simple column context"""
+         """采集样本值和简单列上下文"""
          table_ref = self._quote_table(full_name)
          with self.database._engine.connect() as conn:
              for column in columns:

@@ -1,6 +1,6 @@
 """
-SQL database abstraction layer.
-Adapted from Dataherald's sql_database/base.py with improved type safety.
+SQL 数据库抽象层。
+基于 Dataherald 的 sql_database/base.py 改造，并增强类型安全。
 """
 from __future__ import annotations
 
@@ -34,7 +34,7 @@ class SQLInjectionError(Exception):
 
 
 class SQLDatabase:
-     """Wrapper around SQLAlchemy engine"""
+     """SQLAlchemy engine 的封装器"""
 
      def __init__(self, engine, dialect: str = ""):
          self._engine = engine
@@ -45,7 +45,7 @@ class SQLDatabase:
          database_connection: DatabaseConnection,
          read_only: bool = False,
      ) -> "SQLDatabase":
-         """Create a SQLDatabase from connection config"""
+         """根据数据库连接配置创建 SQLDatabase"""
          uri = database_connection.connection_uri
          if read_only:
              engine = create_engine(uri, connect_args={"options": "-c default_transaction_read_only=on"})
@@ -54,7 +54,7 @@ class SQLDatabase:
          return SQLDatabase(engine)
 
      def get_tables_and_views(self) -> List[str]:
-         """Get all table and view names"""
+         """获取所有表和视图名称"""
          inspector = inspect(self._engine)
          schemas = inspector.get_schema_names()
          tables = []
@@ -72,7 +72,7 @@ class SQLDatabase:
      def run_sql(
          self, query: str, top_k: Optional[int] = None
      ) -> Tuple[str, Dict[str, Any]]:
-         """Execute SQL query and return results"""
+         """执行 SQL 查询并返回结果"""
          query = self.parser_to_filter_commands(query)
          with self._engine.connect() as connection:
              result = connection.execute(text(query))
@@ -87,7 +87,7 @@ class SQLDatabase:
              return query, {"result": data, "columns": columns, "row_count": len(data)}
 
      def parser_to_filter_commands(self, query: str) -> str:
-         """Filter dangerous SQL commands"""
+         """过滤危险 SQL 命令"""
          query_upper = query.upper().strip()
          for pattern in SQL_INJECTION_PATTERNS:
              if re.search(pattern, query_upper, re.IGNORECASE):
@@ -95,7 +95,7 @@ class SQLDatabase:
          return query
 
      def get_table_ddl(self, table_name: str) -> str:
-         """Get CREATE TABLE statement for a table"""
+         """获取指定表的 CREATE TABLE 语句"""
          inspector = inspect(self._engine)
          try:
              columns = inspector.get_columns(table_name)
@@ -111,11 +111,11 @@ class SQLDatabase:
              default = f" DEFAULT {col['default']}" if col.get("default") else ""
              col_defs.append(f"  {col['name']} {col_type}{nullable}{default}")
 
-         # Primary keys
+         # 主键
          if pk.get("constrained_columns"):
              col_defs.append(f"  PRIMARY KEY ({', '.join(pk['constrained_columns'])})")
 
-         # Foreign keys
+         # 外键
          for fk in fks:
              col_defs.append(
                  f"  FOREIGN KEY ({', '.join(fk['constrained_columns'])}) "

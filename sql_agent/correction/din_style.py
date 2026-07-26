@@ -1,12 +1,11 @@
 """
-DIN-SQL style correction.
+DIN-SQL 风格纠错。
 
-Inspired by "DIN-SQL: Decomposed In-Context Learning of Text-to-SQL with Self-Correction"
+灵感来自论文 "DIN-SQL: Decomposed In-Context Learning of Text-to-SQL with Self-Correction"
 (https://arxiv.org/abs/2304.11015)
 
-Key idea: Decompose complex questions into simpler sub-problems,
-solve each sub-problem separately, then merge the results.
-This module implements a lightweight version focused on the correction phase.
+核心思想：将复杂问题拆解成更简单的子问题，分别求解后再合并结果。
+本模块实现的是面向纠错阶段的轻量版本。
 """
 from __future__ import annotations
 
@@ -49,12 +48,12 @@ Output the corrected SQL inside a ```sql block.
 
 class DINStyleCorrector(SQLCorrector):
      """
-     DIN-SQL inspired corrector.
+     受 DIN-SQL 启发的纠错器。
      
-     Uses a verify-then-fix approach:
-     1. Verify the original SQL against the question
-     2. Identify specific issues (table/column/join/filter)
-     3. Generate a corrected version
+     采用先验证再修复的流程：
+     1. 对照问题验证原始 SQL
+     2. 识别具体问题（表、列、JOIN、过滤条件）
+     3. 生成修正后的版本
      """
 
      def __init__(
@@ -74,7 +73,7 @@ class DINStyleCorrector(SQLCorrector):
          schema_info: Optional[str] = None,
          error: Optional[str] = None,
      ) -> CorrectionResult:
-         """Apply DIN-SQL style correction"""
+         """应用 DIN-SQL 风格纠错"""
          current_sql = sql
          error_context = ""
          if error:
@@ -83,7 +82,7 @@ class DINStyleCorrector(SQLCorrector):
          for round_num in range(self.max_rounds):
              logger.info(f"DIN correction round {round_num + 1}/{self.max_rounds}")
 
-             # Step 1: Verify and fix
+             # 第 1 步：验证并修复
              prompt = DECOMPOSE_PROMPT.format(
                  question=question,
                  sql=current_sql,
@@ -93,9 +92,9 @@ class DINStyleCorrector(SQLCorrector):
 
              response = self.llm.generate([{"role": "user", "content": prompt}])
 
-             # Check if verified
+             # 检查是否已通过验证
              if "VERIFIED: true" in response:
-                 # Extract SQL if present, else use original
+                 # 如果响应中包含 SQL，则提取 SQL；否则继续使用原始 SQL
                  sql_match = re.search(r"```sql\s*(.*?)\s*```", response, re.DOTALL)
                  final_sql = sql_match.group(1).strip() if sql_match else current_sql
                  
@@ -109,12 +108,12 @@ class DINStyleCorrector(SQLCorrector):
                          sql_before=sql,
                      )
 
-             # Extract corrected SQL
+             # 提取修正后的 SQL
              sql_match = re.search(r"```sql\s*(.*?)\s*```", response, re.DOTALL)
              if sql_match:
                  current_sql = sql_match.group(1).strip()
 
-             # Validate
+             # 校验修正后的 SQL
              is_valid, error_context = self.validate_sql(current_sql)
              if is_valid:
                  return CorrectionResult(

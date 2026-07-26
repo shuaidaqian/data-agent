@@ -1,6 +1,6 @@
 """
-SQL generation evaluator.
-Provides confidence scoring for generated SQL.
+SQL 生成结果评估器。
+为生成的 SQL 提供置信度评分。
 """
 from __future__ import annotations
 
@@ -33,7 +33,7 @@ Feedback: [brief explanation]
 
 
 class Evaluator(Component):
-     """Evaluates generated SQL quality and confidence"""
+     """评估生成 SQL 的质量和置信度"""
 
      def __init__(self, system: System):
          super().__init__(system)
@@ -46,7 +46,7 @@ class Evaluator(Component):
          sql_generation: SQLGeneration,
          metadata: Optional[Dict[str, Any]] = None,
      ) -> Optional[float]:
-         """Calculate confidence score for generated SQL"""
+         """计算生成 SQL 的置信度分数"""
          if not sql_generation.sql or sql_generation.status in (SQLStatus.INVALID, "INVALID"):
              return 0.0
 
@@ -71,13 +71,13 @@ class Evaluator(Component):
              return None
 
      def evaluate(self, sql: str, question: str) -> float:
-         """Evaluate SQL using the configured evaluator interface"""
+         """使用统一评估接口评估 SQL"""
          generation = SQLGeneration(prompt_id="", sql=sql, status=SQLStatus.PENDING)
          score = self.get_confidence_score(Prompt(text=question), generation)
          return 0.0 if score is None else score
 
      def _parse_score(self, response: str) -> Optional[float]:
-         """Parse the overall score from LLM response"""
+         """从 LLM 响应中解析总体分数"""
          import re
          match = re.search(r"Overall:\s*([0-9.]+)", response)
          if match:
@@ -87,24 +87,24 @@ class Evaluator(Component):
 
 class SimpleEvaluator(Evaluator):
      """
-     Simple heuristic-based evaluator when LLM evaluation is not desired.
-     Checks SQL syntax, keyword presence, and basic structure.
+     简单启发式评估器，用于不希望调用 LLM 评估的场景。
+     检查 SQL 语法、关键词存在性和基础结构。
      """
 
      def __init__(self, system: System):
          super().__init__(system)
 
      def evaluate(self, sql: str, question: str) -> float:
-         """Simple heuristic scoring"""
-         score = 0.5  # Base score
+         """简单启发式打分"""
+         score = 0.5  # 基础分
 
-         # Bonus for having SELECT (valid query)
+         # 包含 SELECT 时加分，表示基本像一个查询
          if "SELECT" in sql.upper():
              score += 0.2
          else:
              score -= 0.3
 
-         # Penalty for common issues
+         # 对常见结构问题扣分
          if "FROM" not in sql.upper():
              score -= 0.2
 

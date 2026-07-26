@@ -1,12 +1,12 @@
 """
-Schema Linking module.
+Schema Linking 模块。
 
-NEW: Improved schema linking for accurate JOIN path detection.
-Dataherald's approach only used embedding similarity on individual tables.
-This module:
-- Identifies foreign key relationships for JOIN path discovery
-- Links question entities to schema elements more precisely
-- Generates JOIN path suggestions for multi-table queries
+新增能力：增强 schema linking，用于更准确地检测 JOIN 路径。
+Dataherald 原始方案主要对单表做 embedding 相似度检索。
+本模块提供：
+- 识别外键关系，用于发现 JOIN 路径
+- 更精确地将问题实体链接到 schema 元素
+- 为多表查询生成 JOIN 路径建议
 """
 from __future__ import annotations
 
@@ -21,12 +21,12 @@ logger = logging.getLogger(__name__)
 
 class SchemaLinker:
      """
-     Schema linking for NL-to-SQL.
+     面向 NL-to-SQL 的 Schema Linking。
 
-     Key improvements over Dataherald:
-     - Explicit FK-based JOIN path discovery
-     - Question-to-schema entity linking
-     - Multi-table relationship graph building
+     相比 Dataherald 的关键改进：
+     - 基于显式外键发现 JOIN 路径
+     - 将问题实体链接到 schema
+     - 构建多表关系图
      """
 
      def __init__(self, table_descriptions: List[TableDescription]):
@@ -34,9 +34,9 @@ class SchemaLinker:
          self._build_relationship_graph()
 
      def _build_relationship_graph(self) -> None:
-         """Build a graph of table relationships"""
+         """构建表关系图"""
          self.adjacency: Dict[str, List[Tuple[str, str, str]]] = {}
-         # Maps: table_name -> [(related_table, fk_column, ref_column)]
+         # 映射：table_name -> [(related_table, fk_column, ref_column)]
 
          for table in self.tables:
              table_key = self._table_key(table)
@@ -61,8 +61,8 @@ class SchemaLinker:
          self, table_names: List[str]
      ) -> List[Dict[str, str]]:
          """
-         Find JOIN paths between a set of tables.
-         Returns suggested JOIN conditions.
+         在一组表之间查找 JOIN 路径。
+         返回建议的 JOIN 条件。
          """
          if len(table_names) < 2:
              return []
@@ -86,14 +86,14 @@ class SchemaLinker:
          self, entity: str
      ) -> List[Dict[str, str]]:
          """
-         Find schema elements (tables/columns) related to a given entity.
-         Uses exact match, case-insensitive, and partial match.
+         查找与给定实体相关的 schema 元素（表/列）。
+         使用精确匹配、大小写不敏感匹配和部分匹配。
          """
          entity_lower = entity.lower().replace("_", " ")
          matches = []
 
          for table in self.tables:
-             # Match table name
+             # 匹配表名
              table_name_lower = table.table_name.lower().replace("_", " ")
              if entity_lower in table_name_lower or table_name_lower in entity_lower:
                  matches.append({
@@ -102,7 +102,7 @@ class SchemaLinker:
                      "relevance": "high",
                  })
 
-             # Match column names
+             # 匹配列名
              for col in table.columns:
                  col_name_lower = col.name.lower().replace("_", " ")
                  if entity_lower in col_name_lower or col_name_lower in entity_lower:
@@ -117,7 +117,7 @@ class SchemaLinker:
          return matches
 
      def get_join_graph_summary(self) -> str:
-         """Get a summary of all relationships for the agent prompt"""
+         """获取所有关系摘要，供 Agent prompt 使用"""
          if not self.adjacency:
              return "No foreign key relationships detected."
 
@@ -135,8 +135,8 @@ class SchemaLinker:
          self, table_a: str, table_b: str
      ) -> Optional[List[str]]:
          """
-         BFS between two tables to find a join path through FKs.
-         Returns the path of table names.
+         在两张表之间通过 BFS 查找基于外键的 JOIN 路径。
+         返回表名路径。
          """
          if table_a not in self.adjacency or table_b not in self.adjacency:
              return None

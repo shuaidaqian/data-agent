@@ -1,6 +1,6 @@
 """
-Document storage abstraction (MongoDB).
-Adapted from Dataherald's db module.
+文档存储抽象层（MongoDB）。
+改造自 Dataherald 的 db 模块。
 """
 from __future__ import annotations
 
@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 
 
 class StorageBackend(Component, ABC):
-     """Abstract storage backend"""
+     """存储后端抽象接口"""
 
      def __init__(self, system: System):
          super().__init__(system)
@@ -41,7 +41,7 @@ class StorageBackend(Component, ABC):
 
 
 class MongoStorage(StorageBackend):
-     """MongoDB storage implementation"""
+     """MongoDB 存储实现"""
 
      def __init__(self, system: System):
          super().__init__(system)

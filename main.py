@@ -1,7 +1,7 @@
 """
-SQL Agent - Natural Language to SQL Engine
+SQL Agent - 自然语言转 SQL 引擎
 
-Entry point for the FastAPI application.
+FastAPI 应用入口。
 """
 from __future__ import annotations
 
@@ -27,14 +27,14 @@ logger = logging.getLogger(__name__)
 
 
 def create_app() -> FastAPI:
-     """Create and configure the FastAPI application"""
+     """创建并配置 FastAPI 应用"""
      app = FastAPI(
          title="SQL Agent API",
          description="Natural Language to SQL Engine",
          version="0.1.0",
      )
 
-     # CORS
+     # 跨域配置
      app.add_middleware(
          CORSMiddleware,
          allow_origins=["*"],
@@ -43,7 +43,7 @@ def create_app() -> FastAPI:
          allow_headers=["*"],
      )
 
-     # Import and include routes
+     # 导入并挂载 API 路由
      from sql_agent.api.routes import router
      app.include_router(router)
 

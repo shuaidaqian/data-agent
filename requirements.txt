@@ -1,4 +1,4 @@
- # SQL Agent - Core Dependencies
+ # SQL Agent 核心依赖
  fastapi>=0.104.0
  uvicorn>=0.24.0
  pydantic>=2.0
@@ -15,10 +15,10 @@
  overrides>=7.4.0
  python-multipart>=0.0.6
  
- # Development
+ # 开发依赖
  pytest>=7.4.0
  pytest-asyncio>=0.23.0
  httpx>=0.25.0
  
- # Optional: Azure OpenAI
- # No extra deps needed - openai SDK supports both
+ # 可选：Azure OpenAI
+ # 无需额外依赖，openai SDK 同时支持 OpenAI 和 Azure OpenAI

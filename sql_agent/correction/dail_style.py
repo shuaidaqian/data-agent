@@ -1,11 +1,11 @@
 """
-DAIL-SQL style correction.
+DAIL-SQL 风格纠错。
 
-Inspired by "DAIL-SQL: Execution-feedback Driven Iterative SQL Refinement"
+灵感来自论文 "DAIL-SQL: Execution-feedback Driven Iterative SQL Refinement"
 (https://arxiv.org/abs/2308.02266)
 
-Key idea: Execute the SQL, get feedback from the database (or LLM),
-then iteratively improve the SQL based on execution results.
+核心思想：先执行 SQL，从数据库（或 LLM）获得反馈，
+再根据执行结果迭代改进 SQL。
 """
 from __future__ import annotations
 
@@ -58,13 +58,13 @@ Also verify: the SQL query should be syntactically valid and use only tables/col
 
 class DAILStyleCorrector(SQLCorrector):
      """
-     DAIL-SQL inspired corrector.
+     受 DAIL-SQL 启发的纠错器。
      
-     Uses an execute-feedback-fix loop:
-     1. Execute the SQL to get errors (or sample results)
-     2. Feed the error/result back to the LLM
-     3. Let the LLM suggest a fix
-     4. Repeat until valid or max rounds reached
+     使用“执行-反馈-修复”循环：
+     1. 执行 SQL，获取错误信息或样例结果
+     2. 将错误或结果反馈给 LLM
+     3. 让 LLM 给出修复建议
+     4. 重复直到 SQL 有效或达到最大轮数
      """
 
      def __init__(
@@ -78,8 +78,8 @@ class DAILStyleCorrector(SQLCorrector):
 
      def _execute_and_get_feedback(self, sql: str) -> Tuple[str, bool]:
          """
-         Execute SQL and return feedback string.
-         Returns (feedback, is_success).
+         执行 SQL 并返回反馈文本。
+         返回值为 (feedback, is_success)。
          """
          try:
              result = self.database.run_sql(sql, top_k=5)
@@ -121,11 +121,11 @@ class DAILStyleCorrector(SQLCorrector):
          for round_num in range(self.max_rounds):
              logger.info(f"DAIL correction round {round_num + 1}/{self.max_rounds}")
 
-             # Execute and get feedback
+             # 执行 SQL 并获取反馈
              feedback, executed = self._execute_and_get_feedback(current_sql)
 
              if executed and "WARNING" not in feedback:
-                 # SQL executed successfully - check consistency
+                 # SQL 执行成功后，继续检查是否与用户问题一致
                  consistency = self.llm.generate([{"role": "user", "content": CONSISTENCY_CHECK_PROMPT.format(
                      question=question, sql=current_sql
                  )}])
@@ -143,7 +143,7 @@ class DAILStyleCorrector(SQLCorrector):
              elif executed and "WARNING" in feedback:
                  feedback += "\nNote: Zero rows may indicate incorrect filters or conditions."
 
-             # Generate fix
+             # 根据反馈生成修复版本
              prompt = EXECUTION_FEEDBACK_PROMPT.format(
                  question=question,
                  sql=current_sql,

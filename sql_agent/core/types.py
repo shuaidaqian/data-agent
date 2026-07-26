@@ -40,7 +40,7 @@ class ColumnMetadata:
      description: Optional[str] = None
      is_primary_key: bool = False
      is_foreign_key: bool = False
-     foreign_key_ref: Optional[str] = None  # "schema.table.column"
+     foreign_key_ref: Optional[str] = None  # 格式："schema.table.column"
      low_cardinality: bool = False
      categories: Optional[List[str]] = None
      sample_values: Optional[List[str]] = None
@@ -90,7 +90,7 @@ class ConversationTurn:
 class Conversation:
      """
      多轮对话会话
-     NEW: Dataherald 缺失的多轮对话管理
+     新增：Dataherald 缺失的多轮对话管理
      """
      id: Optional[str] = None
      db_connection_id: str = ""
@@ -108,7 +108,7 @@ class SQLStatus(str, Enum):
      VALID = "VALID"
      INVALID = "INVALID"
      EXECUTED = "EXECUTED"
-     CORRECTED = "CORRECTED"  # NEW: 经 self-correct 后修正
+     CORRECTED = "CORRECTED"  # 新增：经自纠错后修正
 
 
 @dataclass
@@ -125,7 +125,7 @@ class SQLGeneration:
      """SQL 生成结果"""
      id: Optional[str] = None
      prompt_id: str = ""
-     conversation_id: Optional[str] = None  # NEW: 关联多轮对话
+     conversation_id: Optional[str] = None  # 新增：关联多轮对话
      sql: Optional[str] = None
      status: str = SQLStatus.PENDING
      confidence_score: Optional[float] = None
@@ -134,7 +134,7 @@ class SQLGeneration:
      intermediate_steps: Optional[List[IntermediateStep]] = None
      created_at: datetime = field(default_factory=datetime.now)
      completed_at: Optional[datetime] = None
-     # NEW: 自纠正相关
+     # 新增：自纠正相关字段
      correction_rounds: int = 0
      sql_before_correction: Optional[str] = None
      correction_reason: Optional[str] = None
@@ -189,9 +189,9 @@ class LLMConfig:
 class AgentConfig:
      """
      Agent 路由配置
-     NEW: 根据查询复杂度自动选择 Agent 模式
+     新增：根据查询复杂度自动选择 Agent 模式
      """
-     mode: str = "auto"  # "react" | "plan_solve" | "auto"
+     mode: str = "auto"  # 可选值："react" | "plan_solve" | "auto"
      max_iterations: int = 15
      max_execution_time: int = 150
      enable_self_correction: bool = True

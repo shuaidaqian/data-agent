@@ -1,10 +1,10 @@
 """
-Context retriever for few-shot examples and instructions.
+用于 few-shot 示例和管理员指令的上下文检索器。
 
-Handles:
-- Vector similarity search for golden SQLs (same as Dataherald)
-- Admin instruction retrieval by db_connection_id
-- Schema-aware filtering
+负责：
+- 对 Golden SQL 做向量相似度检索（与 Dataherald 类似）
+- 根据 db_connection_id 检索管理员指令
+- 支持 schema 感知过滤扩展
 """
 from __future__ import annotations
 
@@ -21,7 +21,7 @@ COLLECTION_GOLDEN_SQL = "golden_sqls"
 
 class ContextRetriever:
      """
-     Retrieves context (few-shot examples + instructions) for NL-to-SQL.
+     为 NL-to-SQL 检索上下文（few-shot 示例 + 管理员指令）。
      """
 
      def __init__(
@@ -38,7 +38,7 @@ class ContextRetriever:
          number_of_samples: int = 5,
      ) -> Optional[List[Dict[str, Any]]]:
          """
-         Retrieve relevant golden SQL examples using vector similarity.
+         使用向量相似度检索相关 Golden SQL 示例。
          """
          results = self.vector_store.query(
              query_texts=[prompt.text],
@@ -52,7 +52,7 @@ class ContextRetriever:
 
          samples = []
          for res in results:
-             # Load full golden SQL from storage
+             # 从存储中加载完整 Golden SQL
              golden = self.db_storage.find_one(
                  "golden_sqls", {"_id": res.get("id")}
              )
@@ -71,7 +71,7 @@ class ContextRetriever:
          db_connection_id: str,
      ) -> Optional[List[Dict[str, str]]]:
          """
-         Retrieve admin instructions for the given database connection.
+         检索指定数据库连接的管理员指令。
          """
          instructions = self.db_storage.find(
              "instructions",
@@ -89,7 +89,7 @@ class ContextRetriever:
          number_of_samples: int = 5,
      ) -> Tuple[Optional[List[Dict[str, Any]]], Optional[List[Dict[str, str]]]]:
          """
-         Convenience method to retrieve both few-shot examples and instructions.
+         便捷方法：同时检索 few-shot 示例和管理员指令。
          """
          examples = self.retrieve_few_shot_examples(prompt, number_of_samples)
          instructions = self.retrieve_instructions(prompt.db_connection_id)

@@ -1,5 +1,5 @@
 """
-ContextStore abstraction (same role as Dataherald's context_store).
+ContextStore 抽象层，作用与 Dataherald 的 context_store 类似。
 """
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ from sql_agent.storage.vector import VectorBackend
 
 
 class ContextStore(Component, ABC):
-     """Abstract context store interface"""
+     """上下文存储抽象接口"""
 
      def __init__(self, system: System):
          super().__init__(system)
@@ -26,7 +26,7 @@ class ContextStore(Component, ABC):
 
 
 class DefaultContextStore(ContextStore):
-     """Default context store implementation"""
+     """默认上下文存储实现"""
 
      def __init__(self, system: System):
          super().__init__(system)

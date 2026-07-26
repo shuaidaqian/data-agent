@@ -1,14 +1,14 @@
 """
-Complex SQL decomposition module.
+复杂 SQL 分解模块。
 
-NEW: Handles complex SQL patterns that Dataherald struggles with:
-- Multi-table JOINs with non-trivial relationships
-- Nested subqueries
-- CTEs (Common Table Expressions)
-- Window functions
-- Complex aggregations
+新增能力：处理 Dataherald 较难稳定覆盖的复杂 SQL 模式：
+- 具有非平凡关系的多表 JOIN
+- 嵌套子查询
+- CTE（公共表表达式）
+- 窗口函数
+- 复杂聚合
 
-Decomposes complex queries into simpler sub-problems.
+该模块会将复杂查询拆解为更简单的子问题。
 """
 from __future__ import annotations
 
@@ -50,8 +50,8 @@ Output the final SQL inside a ```sql block.
 
 class ComplexSQLDecomposer:
      """
-     Decomposes complex SQL queries into simpler parts.
-     Uses a decompose-then-compose strategy.
+     将复杂 SQL 查询拆解为更简单的部分。
+     使用先分解、再组合的策略。
      """
 
      def __init__(self, llm: LLMBackend):
@@ -64,8 +64,8 @@ class ComplexSQLDecomposer:
          table_descriptions: List,
      ) -> Optional[Dict[str, Any]]:
          """
-         Decompose a complex question and generate SQL.
-         Returns dict with 'sql', 'sub_questions', and 'explanation'.
+         分解复杂问题并生成 SQL。
+         返回包含 sql、sub_questions 和 explanation 的字典。
          """
          prompt = COMPLEX_SQL_PROMPT.format(
              question=question,
@@ -74,7 +74,7 @@ class ComplexSQLDecomposer:
 
          response = self.llm.generate([{"role": "user", "content": prompt}])
 
-         # Extract SQL
+         # 提取 SQL
          sql_match = re.search(r"```sql\s*(.*?)\s*```", response, re.DOTALL)
          sql = sql_match.group(1).strip() if sql_match else None
 
@@ -86,22 +86,22 @@ class ComplexSQLDecomposer:
      @staticmethod
      def is_complex_query(question: str) -> bool:
          """
-         Quick heuristic check if a question requires complex SQL.
+         使用启发式规则快速判断问题是否需要复杂 SQL。
          """
          text = question.lower()
          complex_indicators = [
-             # Multi-table
+             # 多表查询
              " and ", " each ", " per ", " compared to ", " versus ",
-             # Aggregations
+             # 聚合
              " average ", " median ", " standard deviation ", " variance ",
              " moving average ", " running total ", " cumulative ",
-             # Time series
+             # 时间序列
              " month over month", " month-over-month", " quarter over quarter",
              "同比", "环比", " year to date ", " year-over-year ",
-             # Ranking
+             # 排名
              " top 3", " top 5", " top 10", " bottom ", " rank ",
              " highest ", " lowest ", " most ", " least ",
-             # Comparisons
+             # 对比
              " percentage ", " proportion ", " ratio ", " share of ",
              " compare ", " difference between ",
          ]
@@ -109,7 +109,7 @@ class ComplexSQLDecomposer:
 
      @staticmethod
      def get_query_type(question: str) -> str:
-         """Classify the type of SQL query needed"""
+         """分类所需 SQL 查询类型"""
          text = question.lower()
          if any(w in text for w in ["month over month", "环比", "同比", "trend", "趋势"]):
              return "time_series"

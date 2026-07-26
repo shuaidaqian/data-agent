@@ -1,7 +1,7 @@
 """
-IoC (Inversion of Control) container.
-All core components are swappable via environment variables.
-Inspired by Dataherald config.py plugin system.
+IoC（控制反转）容器。
+所有核心组件都可以通过环境变量替换实现。
+设计思路参考 Dataherald config.py 的插件系统。
 """
 from __future__ import annotations
 import importlib

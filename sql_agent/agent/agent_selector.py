@@ -1,11 +1,11 @@
 """
-Agent Selector
+Agent 选择器。
 
-NEW: Automatically selects the best agent mode based on query complexity.
-- 'simple' questions: ReAct Agent (fast, lightweight)
-- 'medium' questions: ReAct Agent (sufficient with few-shot)
-- 'complex' questions: Plan-and-Solve Agent (structured planning)
-- User can also force a specific mode via AgentConfig
+新增能力：根据查询复杂度自动选择最合适的 Agent 模式。
+- simple 问题：ReAct Agent（快速、轻量）
+- medium 问题：ReAct Agent（结合 few-shot 通常足够）
+- complex 问题：Plan-and-Solve Agent（结构化规划）
+- 用户也可以通过 AgentConfig 强制指定模式
 """
 from __future__ import annotations
 
@@ -29,13 +29,13 @@ logger = logging.getLogger(__name__)
 
 class AgentSelector:
      """
-     Routes queries to the appropriate agent based on complexity.
+     根据复杂度将查询路由到合适的 Agent。
 
-     Complexity estimation considers:
-     - Question length and structure
-     - Keywords indicating joins, aggregations, or time-series
-     - Number of available tables in the schema
-     - Whether conversation history exists
+     复杂度估算会考虑：
+     - 问题长度和结构
+     - 表示 JOIN、聚合或时间序列的关键词
+     - 当前 schema 中可用表数量
+     - 是否存在对话历史
      """
 
      def __init__(
@@ -48,12 +48,12 @@ class AgentSelector:
          self.llm_config = llm_config or LLMConfig()
          self.agent_config = agent_config or AgentConfig()
 
-         # Initialize both agents
+         # 同时初始化两种 Agent，后续根据复杂度路由
          self._react_agent = ReActAgent(system, llm_config, agent_config)
          self._plan_solve_agent = PlanSolveAgent(system, llm_config, agent_config)
 
      def select_agent(self, complexity: str) -> SQLAgent:
-         """Select the appropriate agent based on complexity"""
+         """根据复杂度选择合适的 Agent"""
          mode = self.agent_config.mode
 
          if mode == "react":
@@ -81,8 +81,8 @@ class AgentSelector:
          instructions: Optional[List[Dict[str, str]]] = None,
          metadata: Optional[Dict[str, Any]] = None,
      ) -> AgentResult:
-         """Automatically select agent and generate SQL"""
-         # Estimate complexity
+         """自动选择 Agent 并生成 SQL"""
+         # 估算查询复杂度
          complexity = self._react_agent.estimate_complexity(prompt, table_descriptions)
          agent = self.select_agent(complexity)
 
@@ -106,7 +106,7 @@ class AgentSelector:
          instructions: Optional[List[Dict[str, str]]] = None,
          metadata: Optional[Dict[str, Any]] = None,
      ):
-         """Automatically select agent and stream SQL generation"""
+         """自动选择 Agent 并流式返回 SQL 生成过程"""
          complexity = self._react_agent.estimate_complexity(prompt, table_descriptions)
          agent = self.select_agent(complexity)
          yield from agent.stream_sql(

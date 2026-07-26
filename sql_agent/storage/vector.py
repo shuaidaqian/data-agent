@@ -1,6 +1,6 @@
 """
-Vector store abstraction.
-Supports Chroma, Pinecone, and Astra DB (same as Dataherald).
+向量存储抽象层。
+支持 Chroma、Pinecone 和 Astra DB，设计上与 Dataherald 保持一致。
 """
 from __future__ import annotations
 
@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 
 
 class VectorBackend(Component, ABC):
-     """Abstract vector store interface"""
+     """向量存储抽象接口"""
 
      def __init__(self, system: System):
          super().__init__(system)
@@ -40,7 +40,7 @@ class VectorBackend(Component, ABC):
 
 
 class ChromaVectorStore(VectorBackend):
-     """ChromaDB vector store implementation"""
+     """ChromaDB 向量存储实现"""
 
      def __init__(self, system: System):
          super().__init__(system)

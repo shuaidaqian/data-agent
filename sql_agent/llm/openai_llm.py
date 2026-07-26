@@ -1,5 +1,5 @@
 """
-OpenAI / Azure OpenAI LLM implementation
+OpenAI / Azure OpenAI LLM 实现
 """
 from __future__ import annotations
 
@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 
 
 class OpenAILLM(LLMBackend):
-     """OpenAI / Azure OpenAI LLM implementation"""
+     """OpenAI / Azure OpenAI LLM 实现"""
 
      def __init__(self, system: System):
          super().__init__(system)

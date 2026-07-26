@@ -1,13 +1,13 @@
 """
-Plan-and-Solve Agent implementation.
+Plan-and-Solve Agent 实现。
 
-An advanced agent pattern that:
-1. First creates a structured plan for the SQL query
-2. Then executes each step of the plan
-3. Refines the plan based on execution feedback
+这是一种更适合复杂查询的 Agent 模式：
+1. 先为 SQL 查询创建结构化计划
+2. 再逐步执行计划中的步骤
+3. 根据执行反馈细化计划或 SQL
 
-This is better for complex queries that require multi-step reasoning,
-such as multi-table JOINs, nested subqueries, or aggregations.
+该模式更适合需要多步推理的复杂查询，
+例如多表 JOIN、嵌套子查询或聚合查询。
 """
 from __future__ import annotations
 
@@ -83,13 +83,13 @@ Output the complete SQL query inside a ```sql block.
 
 class PlanSolveAgent(SQLAgent):
      """
-     Plan-and-Solve Agent
+     Plan-and-Solve Agent。
 
-     Separates reasoning into two phases:
-     1. Planning: Analyze and structure the approach
-     2. Solving: Execute the plan step by step
+     将推理拆成两个阶段：
+     1. 规划：分析问题并组织求解路径
+     2. 求解：逐步执行计划
 
-     Better suited for complex multi-table queries.
+     更适合复杂的多表查询。
      """
 
      def __init__(self, system, llm_config=None, agent_config=None):
@@ -143,7 +143,7 @@ class PlanSolveAgent(SQLAgent):
          steps = []
          total_tokens = 0
 
-         # Conversation context
+         # 对话上下文
          conv_context = ""
          if conversation and len(conversation.turns) >= 2:
              conv_context = "Conversation history:\n"
@@ -152,7 +152,7 @@ class PlanSolveAgent(SQLAgent):
                  if turn.sql:
                      conv_context += f"SQL: {turn.sql}\n"
 
-         # ─── PHASE 1: Create a plan ─────────────────────────
+         # ─── 阶段 1：创建计划 ──────────────────────────────
          table_list = ", ".join(
              f"{t.schema_name}.{t.table_name}" if t.schema_name else t.table_name
              for t in table_descriptions[:10]
@@ -178,7 +178,7 @@ class PlanSolveAgent(SQLAgent):
              observation="Plan created successfully"
          ))
 
-         # ─── PHASE 2: Execute the plan ──────────────────────
+         # ─── 阶段 2：执行计划 ──────────────────────────────
          messages = [
              {"role": "system", "content": system_prompt},
              {"role": "user", "content": f"Plan: {plan_text}\n\nQuestion: {prompt.text}\n{conv_context}\nExecute the plan using available tools."}
@@ -196,7 +196,7 @@ class PlanSolveAgent(SQLAgent):
              response = llm.generate(messages, config=self.llm_config)
              total_tokens += llm.count_tokens(response)
 
-             # Check for final SQL
+             # 检查是否已经生成最终 SQL
              if "```sql" in response:
                  sql = self.extract_sql_from_output(response)
                  if sql:
@@ -208,7 +208,7 @@ class PlanSolveAgent(SQLAgent):
                          tokens_used=total_tokens,
                      )
 
-             # Parse tool call
+             # 解析工具调用
              action_match = re.search(r"Action:\s*(\w+)", response)
              if not action_match:
                  messages.append({"role": "assistant", "content": response})
@@ -244,7 +244,7 @@ class PlanSolveAgent(SQLAgent):
              messages.append({"role": "assistant", "content": response})
              messages.append({"role": "user", "content": f"Observation: {obs}\n\nContinue with the plan."})
 
-         # Fallback: Generate SQL without tool execution
+         # 降级方案：不再执行工具，直接生成最终 SQL
          logger.warning("Plan-Solve reached max iterations, generating final SQL")
          final_prompt = FINAL_SQL_PROMPT.format(
              question=prompt.text,

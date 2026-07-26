@@ -1,8 +1,8 @@
 """
-FastAPI route definitions.
+FastAPI 路由定义。
 
-Exposes REST API endpoints for NL-to-SQL functionality.
-Designed to be a drop-in replacement for Dataherald's API layer.
+对外暴露 NL-to-SQL 功能的 REST API。
+设计目标是作为 Dataherald API 层的轻量替代实现。
 """
 from __future__ import annotations
 
@@ -27,7 +27,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/v1", tags=["sql-agent"])
 
 
-# ─── Request/Response Models ─────────────────────────────
+# ─── 请求 / 响应模型 ─────────────────────────────────────
 
 class QuestionRequest(BaseModel):
      question: str
@@ -65,7 +65,7 @@ _conversation_manager: Optional[Any] = None
 
 
 def create_system() -> System:
-     """Create a configured system instance"""
+     """创建已配置的系统实例"""
      global _system
      if _system is None:
          settings = Settings()
@@ -74,7 +74,7 @@ def create_system() -> System:
 
 
 def reset_system() -> None:
-     """Reset global dependencies for tests and local reloads"""
+     """重置全局依赖，供测试和本地热重载使用"""
      global _system, _conversation_manager
      if _system is not None:
          _system.stop()
@@ -83,7 +83,7 @@ def reset_system() -> None:
 
 
 def get_conversation_manager(storage: Any):
-     """Get a storage-backed conversation manager"""
+     """获取带存储后端的对话管理器"""
      global _conversation_manager
      if _conversation_manager is None:
          from sql_agent.context.conversation import ConversationManager
@@ -91,20 +91,20 @@ def get_conversation_manager(storage: Any):
      return _conversation_manager
 
 
-# ─── Health Check ─────────────────────────────────────────
+# ─── 健康检查 ───────────────────────────────────────────
 
 @router.get("/health")
 async def health_check():
      return {"status": "ok", "service": "sql-agent"}
 
 
-# ─── Question → SQL ──────────────────────────────────────
+# ─── 问题 → SQL ─────────────────────────────────────────
 
 @router.post("/question", response_model=SQLResponse)
 async def ask_question(request: QuestionRequest):
      """
-     Ask a natural language question and get SQL.
-     Supports multi-turn conversation via conversation_id.
+     提交自然语言问题并获取 SQL。
+     支持通过 conversation_id 进行多轮对话。
      """
      system = create_system()
      try:
@@ -124,21 +124,21 @@ async def ask_question(request: QuestionRequest):
          context_store = system.instance(ContextStore)
          evaluator = system.instance(Evaluator)
 
-         # Conversation management
+         # 对话管理
          conv_mgr = get_conversation_manager(storage)
          conversation = conv_mgr.get_or_create(
              request.conversation_id,
              request.db_connection_id,
          )
 
-         # Create prompt
+         # 创建 Prompt
          prompt = Prompt(
              text=request.question,
              db_connection_id=request.db_connection_id,
              schemas=request.schemas,
          )
 
-         # Get database and schema
+         # 获取数据库连接和 schema
          db_conn_data = storage.find_one("db_connections", {"id": request.db_connection_id})
          if not db_conn_data:
              raise HTTPException(status_code=404, detail="Database connection not found")
@@ -150,10 +150,10 @@ async def ask_question(request: QuestionRequest):
          scanner = SchemaScanner(database)
          table_descriptions = scanner.scan_all_tables(request.db_connection_id)
 
-         # Get context (few-shot + instructions)
+         # 获取上下文（few-shot 示例 + 管理员指令）
          few_shot, instructions = context_store.retrieve_context_for_question(prompt)
 
-         # Select and run agent
+         # 选择并运行 Agent
          agent_config = AgentConfig(
              mode=request.agent_mode,
              enable_self_correction=request.enable_correction,
@@ -168,7 +168,7 @@ async def ask_question(request: QuestionRequest):
              instructions=instructions,
          )
 
-         # Self-correction
+         # 自纠错
          if request.enable_correction and system.settings.enable_self_correction and result.sql:
              schema_info = "\n".join(t.table_schema for t in table_descriptions[:5])
              corrector = DAILStyleCorrector(llm, database, max_rounds=3)
@@ -186,7 +186,7 @@ async def ask_question(request: QuestionRequest):
          if result.sql:
              confidence_score = evaluator.evaluate(result.sql, request.question)
 
-         # Extract intermediate steps
+         # 提取中间步骤
          steps = []
          for step in getattr(result, "steps", []):
              steps.append({
@@ -195,7 +195,7 @@ async def ask_question(request: QuestionRequest):
                  "observation": step.observation[:200] if step.observation else "",
              })
 
-         # Save to conversation
+         # 保存到对话历史
          conv_mgr.add_turn(
              conversation, "user", request.question
          )
@@ -221,11 +221,11 @@ async def ask_question(request: QuestionRequest):
          raise HTTPException(status_code=500, detail=str(e))
 
 
-# ─── Golden SQL Management ───────────────────────────────
+# ─── Golden SQL 管理 ────────────────────────────────────
 
 @router.post("/golden-sqls")
 async def add_golden_sql(request: GoldenSQLRequest):
-     """Add a golden SQL example for few-shot retrieval"""
+     """添加用于 few-shot 检索的 Golden SQL 示例"""
      system = create_system()
      storage = system.instance(StorageBackend)
      vector = system.instance(VectorBackend)
@@ -244,7 +244,7 @@ async def add_golden_sql(request: GoldenSQLRequest):
 
 @router.get("/golden-sqls")
 async def list_golden_sqls(db_connection_id: str = Query(None)):
-     """List golden SQL examples"""
+     """列出 Golden SQL 示例"""
      system = create_system()
      storage = system.instance(StorageBackend)
      query = {}
@@ -253,11 +253,11 @@ async def list_golden_sqls(db_connection_id: str = Query(None)):
      return storage.find("golden_sqls", query)
 
 
-# ─── Database Connection Management ──────────────────────
+# ─── 数据库连接管理 ─────────────────────────────────────
 
 @router.post("/database-connections")
 async def create_database_connection(request: DBConnectionRequest):
-     """Register a new database connection"""
+     """注册新的数据库连接"""
      system = create_system()
      storage = system.instance(StorageBackend)
      conn = DatabaseConnection(
@@ -273,17 +273,17 @@ async def create_database_connection(request: DBConnectionRequest):
 
 @router.get("/database-connections")
 async def list_database_connections():
-     """List all database connections"""
+     """列出所有数据库连接"""
      system = create_system()
      storage = system.instance(StorageBackend)
      return storage.find("db_connections", {})
 
 
-# ─── Schema / Table Descriptions ──────────────────────────
+# ─── Schema / 表描述 ────────────────────────────────────
 
 @router.post("/database-connections/{db_id}/scan")
 async def scan_database(db_id: str, background_tasks: BackgroundTasks):
-     """Scan database schema"""
+     """扫描数据库 schema"""
      system = create_system()
      storage = system.instance(StorageBackend)
      db_conn_data = storage.find_one("db_connections", {"id": db_id})
@@ -303,17 +303,17 @@ async def scan_database(db_id: str, background_tasks: BackgroundTasks):
 
 @router.get("/table-descriptions/{db_id}")
 async def list_table_descriptions(db_id: str):
-     """Get table descriptions for a database"""
+     """获取指定数据库的表描述"""
      system = create_system()
      storage = system.instance(StorageBackend)
      return storage.find("table_descriptions", {"db_connection_id": db_id})
 
 
-# ─── Conversation Management ─────────────────────────────
+# ─── 对话管理 ───────────────────────────────────────────
 
 @router.get("/conversations")
 async def list_conversations():
-     """List active conversations"""
+     """列出活跃对话"""
      system = create_system()
      storage = system.instance(StorageBackend)
      conv_mgr = get_conversation_manager(storage)
@@ -322,7 +322,7 @@ async def list_conversations():
 
 @router.delete("/conversations/{conversation_id}")
 async def delete_conversation(conversation_id: str):
-     """Delete a conversation"""
+     """删除对话"""
      system = create_system()
      storage = system.instance(StorageBackend)
      conv_mgr = get_conversation_manager(storage)

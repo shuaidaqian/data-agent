@@ -1,10 +1,10 @@
 """
-Self-correction module for SQL generation.
+SQL 生成结果的自纠错模块。
 
-NEW: Dataherald only did basic syntax validation.
-This module implements two SOTA correction strategies:
-- DIN-SQL: Decomposition-then-Linking
-- DAIL-SQL: Execution-feedback driven correction
+新增能力：Dataherald 只做了基础语法校验。
+本模块实现了两类主流纠错策略：
+- DIN-SQL：先分解再链接
+- DAIL-SQL：基于执行反馈的纠错
 """
 from __future__ import annotations
 
@@ -22,7 +22,7 @@ logger = logging.getLogger(__name__)
 
 
 class CorrectionResult:
-     """Result of a correction attempt"""
+     """一次 SQL 纠错尝试的结果"""
      sql: str
      status: str
      reason: Optional[str]
@@ -45,7 +45,7 @@ class CorrectionResult:
 
 
 class SQLCorrector(ABC):
-     """Abstract base for SQL correction strategies."""
+     """SQL 纠错策略的抽象基类"""
 
      def __init__(
          self,
@@ -70,7 +70,7 @@ class SQLCorrector(ABC):
          ...
 
      def validate_sql(self, sql: str) -> Tuple[bool, Optional[str]]:
-         """Validate SQL syntax by attempting EXPLAIN or parsing."""
+         """通过 EXPLAIN 或子查询解析来校验 SQL 语法"""
          if not sql or not sql.strip():
              return False, "Empty SQL query"
          try:

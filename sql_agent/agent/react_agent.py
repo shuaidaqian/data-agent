@@ -1,12 +1,12 @@
 """
-ReAct Agent implementation.
+ReAct Agent 实现。
 
-Replaces Dataherald's LangChain ZeroShotAgent with a native ReAct pattern.
-Key improvements:
-- More controlled Thought-Action-Observation loop
-- Better error handling and retry logic
-- Clean separation of concerns without LangChain coupling
-- Integrated token counting
+使用原生 ReAct 模式替代 Dataherald 中的 LangChain ZeroShotAgent。
+关键改进：
+- 更可控的 Thought-Action-Observation 循环
+- 更清晰的错误处理和重试逻辑
+- 不与 LangChain 耦合，职责边界更清晰
+- 集成 token 统计
 """
 from __future__ import annotations
 
@@ -72,10 +72,10 @@ Also explain your reasoning briefly before the SQL block.
 
 class ReActAgent(SQLAgent):
      """
-     ReAct (Reasoning + Acting) SQL Agent
+     ReAct（Reasoning + Acting）SQL Agent。
 
-     Implements the Thought-Action-Observation loop natively,
-     without relying on LangChain's ZeroShotAgent.
+     原生实现 Thought-Action-Observation 循环，
+     不依赖 LangChain 的 ZeroShotAgent。
      """
 
      def __init__(
@@ -93,14 +93,14 @@ class ReActAgent(SQLAgent):
          return self._llm
 
      def _build_tool_descriptions(self, tools) -> str:
-         """Build tool descriptions for the system prompt"""
+         """为系统提示词构造工具描述"""
          descs = []
          for tool in tools:
              descs.append(f"- {tool.name}: {tool.description}")
          return "\n".join(descs)
 
      def _parse_react_step(self, text: str) -> Optional[Dict[str, str]]:
-         """Parse a ReAct step from LLM output"""
+         """从 LLM 输出中解析 ReAct 步骤"""
          thought_match = re.search(r"Thought:\s*(.*?)(?=Action:|$)", text, re.DOTALL)
          action_match = re.search(r"Action:\s*(\w+)", text)
          input_match = re.search(r"Action Input:\s*(.*?)(?=Thought:|$)", text, re.DOTALL)
@@ -115,7 +115,7 @@ class ReActAgent(SQLAgent):
          return None
 
      def _build_system_prompt(self, toolkit: AgentToolkit) -> str:
-         """Build the system prompt with tool descriptions"""
+         """构造包含工具描述的系统提示词"""
          tools = toolkit.get_tools()
          tool_descs = self._build_tool_descriptions(tools)
 
@@ -134,12 +134,12 @@ class ReActAgent(SQLAgent):
          )
 
      def _build_conversation_context(self, conversation: Optional[Conversation]) -> str:
-         """Build conversation history context for multi-turn support"""
+         """构造多轮对话历史上下文"""
          if not conversation or len(conversation.turns) < 2:
              return ""
 
          context = "\nConversation history:\n"
-         for turn in conversation.turns[-4:]:  # Last 4 turns
+         for turn in conversation.turns[-4:]:  # 最近 4 轮
              role = "User" if turn.role == "user" else "Assistant"
              context += f"{role}: {turn.content}\n"
              if turn.sql:
@@ -180,7 +180,7 @@ class ReActAgent(SQLAgent):
          messages = [{"role": "system", "content": system_prompt}]
          conversation_context = self._build_conversation_context(conversation)
 
-         # Initial user message
+         # 初始用户消息
          user_msg = f"Question: {prompt.text}\n\n{conversation_context}" if conversation_context else f"Question: {prompt.text}"
          messages.append({"role": "user", "content": user_msg})
 
@@ -190,20 +190,20 @@ class ReActAgent(SQLAgent):
          start_time = time.time()
 
          for iteration in range(max_iter):
-             # Check timeout
+             # 检查超时
              elapsed = time.time() - start_time
              if elapsed > self.agent_config.max_execution_time:
                  logger.warning(f"Agent timed out after {elapsed:.1f}s")
                  break
 
-             # Get LLM response
+             # 获取 LLM 响应
              response = llm.generate(
                  messages=messages,
                  config=self.llm_config,
              )
              total_tokens += llm.count_tokens(response)
 
-             # Check if final answer (contains SQL block)
+             # 检查是否已经给出最终答案（包含 SQL 代码块）
              if "```sql" in response:
                  sql = self.extract_sql_from_output(response)
                  if sql:
@@ -215,7 +215,7 @@ class ReActAgent(SQLAgent):
                          tokens_used=total_tokens,
                      )
 
-             # Parse ReAct step
+             # 解析 ReAct 步骤
              step_data = self._parse_react_step(response)
              if not step_data:
                  logger.warning(f"Could not parse step from response: {response[:200]}")
@@ -226,7 +226,7 @@ class ReActAgent(SQLAgent):
                  })
                  continue
 
-             # Execute tool
+             # 执行工具
              tool_name = step_data["action"]
              tool_input = step_data.get("action_input", "")
 
@@ -256,7 +256,7 @@ class ReActAgent(SQLAgent):
                  "content": f"Observation: {obs}\n\nContinue with the next Thought."
              })
 
-         # If we exhausted iterations, try one final generation
+         # 如果迭代次数耗尽，尝试进行一次最终生成
          logger.warning("Agent reached max iterations, attempting final generation")
          final_prompt = FINAL_PROMPT.format(
              conversation_context=conversation_context,
@@ -281,7 +281,7 @@ class ReActAgent(SQLAgent):
          instructions: Optional[List[Dict[str, str]]] = None,
          metadata: Optional[Dict[str, Any]] = None,
      ):
-         """Streaming version - yields intermediate steps"""
+         """流式版本：逐步产出中间步骤"""
          yield {"type": "info", "content": "Streaming not yet implemented for ReActAgent"}
          result = self.generate_sql(
              prompt=prompt,

@@ -1,13 +1,13 @@
 """
-Multi-turn conversation manager.
+多轮对话管理器。
 
-NEW: Dataherald lacks this feature entirely.
-Every prompt was an isolated query with no history awareness.
+新增能力：Dataherald 原始链路基本缺少该能力，
+每次 Prompt 都是独立查询，没有历史感知。
 
-This module provides:
-- Conversation history management with token budget control
-- Reference disambiguation (e.g. "last month" -> resolve from history)
-- Context window management for LLM budget
+本模块提供：
+- 带 token 预算控制的对话历史管理
+- 引用消歧（例如“上个月”需要根据历史推断）
+- 面向 LLM 预算的上下文窗口管理
 """
 from __future__ import annotations
 
@@ -24,13 +24,13 @@ logger = logging.getLogger(__name__)
 
 class ConversationManager:
      """
-     Manages multi-turn conversations with context window control.
+     管理带上下文窗口控制的多轮对话。
 
-     Features:
-     - Turn tracking with role-based history
-     - Token budget management to avoid exceeding LLM limits
-     - Reference disambiguation for follow-up questions
-     - Automatic summarization of long histories
+     功能：
+     - 按角色跟踪对话轮次
+     - 管理 token 预算，避免超过 LLM 限制
+     - 为追问提供引用消歧上下文
+     - 为长历史预留摘要能力
      """
 
      def __init__(
@@ -41,10 +41,10 @@ class ConversationManager:
          storage: Optional[Any] = None,
      ):
          """
-         Args:
-             max_turns: Maximum number of turns to keep in short-term memory
-             max_tokens: Maximum token budget for conversation context
-             ttl_minutes: Time-to-live for conversation (None = no expiry)
+         参数：
+             max_turns: 短期记忆中保留的最大轮次数
+             max_tokens: 对话上下文最大 token 预算
+             ttl_minutes: 对话有效期，None 表示永不过期
          """
          self.max_turns = max_turns
          self.max_tokens = max_tokens
@@ -57,7 +57,7 @@ class ConversationManager:
          db_connection_id: str,
          metadata: Optional[Dict] = None,
      ) -> Conversation:
-         """Create a new conversation session"""
+         """创建新的对话会话"""
          conv = Conversation(
              id=str(uuid4()),
              db_connection_id=db_connection_id,
@@ -72,7 +72,7 @@ class ConversationManager:
          conversation_id: Optional[str] = None,
          db_connection_id: str = "",
      ) -> Conversation:
-         """Get existing conversation or create new one"""
+         """获取已有对话，不存在则创建新对话"""
          if conversation_id:
              conv = self._conversations.get(conversation_id)
              if conv is None:
@@ -80,7 +80,7 @@ class ConversationManager:
              if conv is None:
                  return self.create_conversation(db_connection_id)
 
-             # Check TTL
+             # 检查对话有效期
              if self.ttl_minutes:
                  elapsed = (datetime.now() - conv.updated_at).total_seconds() / 60
                  if elapsed > self.ttl_minutes:
@@ -97,7 +97,7 @@ class ConversationManager:
          sql: Optional[str] = None,
          sql_result: Optional[str] = None,
      ) -> ConversationTurn:
-         """Add a turn to the conversation"""
+         """向对话中追加一轮消息"""
          turn = ConversationTurn(
              role=role,
              content=content,
@@ -107,7 +107,7 @@ class ConversationManager:
          conversation.turns.append(turn)
          conversation.updated_at = datetime.now()
 
-         # Truncate if over budget
+         # 超过预算时截断历史
          self._truncate_if_needed(conversation)
          self._save_conversation(conversation)
          return turn
@@ -119,13 +119,13 @@ class ConversationManager:
          max_turns: int = 4,
      ) -> List[ConversationTurn]:
          """
-         Get the most relevant history turns for the current question.
-         Returns the most recent turns that are related.
+         获取与当前问题最相关的历史轮次。
+         当前实现返回最近的若干轮相关历史。
          """
          if not conversation.turns:
              return []
 
-         # Return the most recent turns (last N pairs = 2*N entries)
+         # 返回最近的若干轮（最近 N 对问答 = 2*N 条记录）
          relevant = conversation.turns[-(max_turns * 2):]
          return relevant
 
@@ -136,8 +136,8 @@ class ConversationManager:
          max_turns: int = 4,
      ) -> str:
          """
-         Build a conversation context string for LLM input.
-         Includes potential reference disambiguation.
+         为 LLM 输入构造对话上下文字符串。
+         其中包含潜在的引用消歧提示。
          """
          if not conversation.turns:
              return ""
@@ -153,7 +153,7 @@ class ConversationManager:
              if turn.sql and turn.role == "assistant":
                  context += f"  SQL: {turn.sql}\n"
 
-         # Add reference disambiguation hint
+         # 增加引用消歧提示
          if len(conversation.turns) >= 2:
              last_turn = conversation.turns[-1]
              if last_turn.role == "user":
@@ -163,14 +163,14 @@ class ConversationManager:
          return context
 
      def _truncate_if_needed(self, conversation: Conversation) -> None:
-         """Truncate conversation if it exceeds max_turns"""
+         """当对话超过 max_turns 时截断历史"""
          if len(conversation.turns) > self.max_turns:
              excess = len(conversation.turns) - self.max_turns
              conversation.turns = conversation.turns[excess:]
              logger.info(f"Truncated {excess} old turns from conversation")
 
      def get_conversation_summary(self, conversation: Conversation) -> str:
-         """Generate a brief summary of the conversation"""
+         """生成对话的简要摘要"""
          if not conversation.turns:
              return "No conversation history"
 
@@ -187,7 +187,7 @@ class ConversationManager:
          return summary
 
      def delete_conversation(self, conversation_id: str) -> bool:
-         """Delete a conversation"""
+         """删除对话"""
          if conversation_id in self._conversations:
              del self._conversations[conversation_id]
              if self.storage:
@@ -198,7 +198,7 @@ class ConversationManager:
          return False
 
      def list_active_conversations(self) -> List[Conversation]:
-         """List all active (non-expired) conversations"""
+         """列出所有活跃且未过期的对话"""
          now = datetime.now()
          active = []
          expired_ids = []
@@ -217,7 +217,7 @@ class ConversationManager:
                      continue
              active.append(conv)
 
-         # Clean up expired
+         # 清理过期对话
          for cid in expired_ids:
              del self._conversations[cid]
              if self.storage:
