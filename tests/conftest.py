@@ -1,18 +1,27 @@
 import pytest
-import sqlalchemy
-from sqlalchemy import create_engine, Column, Integer, String, Float, Date, ForeignKey, text as sa_text
+from sqlalchemy import (
+    create_engine,
+    Column,
+    Integer,
+    String,
+    Float,
+    Date,
+    ForeignKey,
+    text as sa_text,
+)
 from sqlalchemy.orm import declarative_base
-from datetime import date
 from sql_agent.sql.database import SQLDatabase
 from sql_agent.core.types import DatabaseConnection, TableDescription, ColumnMetadata
 
 Base = declarative_base()
+
 
 class Department(Base):
     __tablename__ = "departments"
     id = Column(Integer, primary_key=True)
     name = Column(String(100))
     location = Column(String(100))
+
 
 class Employee(Base):
     __tablename__ = "employees"
@@ -22,12 +31,14 @@ class Employee(Base):
     department_id = Column(Integer, ForeignKey("departments.id"))
     hire_date = Column(Date)
 
+
 class Product(Base):
     __tablename__ = "products"
     id = Column(Integer, primary_key=True)
     name = Column(String(100))
     price = Column(Float)
     category = Column(String(50))
+
 
 class Sale(Base):
     __tablename__ = "sales"
@@ -37,6 +48,7 @@ class Sale(Base):
     quantity = Column(Integer)
     sale_date = Column(Date)
     amount = Column(Float)
+
 
 DATA = [
     ("INSERT INTO departments VALUES (1, 'Engineering', 'Building A')", None),
@@ -57,6 +69,7 @@ DATA = [
     ("INSERT INTO sales VALUES (5, 4, 3, 2, '2023-03-01', 71.98)", None),
 ]
 
+
 @pytest.fixture(scope="session")
 def sqlite_engine():
     engine = create_engine("sqlite:///:memory:", echo=False)
@@ -67,40 +80,76 @@ def sqlite_engine():
         conn.commit()
     yield engine
 
+
 @pytest.fixture
 def sql_database(sqlite_engine):
     return SQLDatabase(sqlite_engine, dialect="sqlite")
+
 
 @pytest.fixture
 def db_connection():
     return DatabaseConnection(id="test_db_1", alias="test_db", connection_uri="sqlite:///:memory:")
 
+
 @pytest.fixture
 def sample_table_descriptions():
     return [
-        TableDescription(table_name="employees", columns=[
-            ColumnMetadata(name="id", data_type="INTEGER", is_primary_key=True),
-            ColumnMetadata(name="name", data_type="VARCHAR", description="Employee full name"),
-            ColumnMetadata(name="salary", data_type="FLOAT", description="Annual salary"),
-            ColumnMetadata(name="department_id", data_type="INTEGER", is_foreign_key=True, foreign_key_ref="departments.id"),
-            ColumnMetadata(name="hire_date", data_type="DATE"),
-        ], table_schema="CREATE TABLE employees (id INTEGER PRIMARY KEY, name VARCHAR, salary FLOAT, department_id INTEGER, hire_date DATE)", description="Employee records"),
-        TableDescription(table_name="departments", columns=[
-            ColumnMetadata(name="id", data_type="INTEGER", is_primary_key=True),
-            ColumnMetadata(name="name", data_type="VARCHAR", description="Department name"),
-            ColumnMetadata(name="location", data_type="VARCHAR"),
-        ], table_schema="CREATE TABLE departments (id INTEGER PRIMARY KEY, name VARCHAR, location VARCHAR)", description="Department info"),
-        TableDescription(table_name="sales", columns=[
-            ColumnMetadata(name="id", data_type="INTEGER", is_primary_key=True),
-            ColumnMetadata(name="product_id", data_type="INTEGER", is_foreign_key=True, foreign_key_ref="products.id"),
-            ColumnMetadata(name="employee_id", data_type="INTEGER", is_foreign_key=True, foreign_key_ref="employees.id"),
-            ColumnMetadata(name="quantity", data_type="INTEGER"),
-            ColumnMetadata(name="amount", data_type="FLOAT", description="Total sale amount"),
-        ], table_schema="CREATE TABLE sales (id INTEGER PRIMARY KEY, product_id INTEGER, employee_id INTEGER, quantity INTEGER, amount FLOAT)"),
-        TableDescription(table_name="products", columns=[
-            ColumnMetadata(name="id", data_type="INTEGER", is_primary_key=True),
-            ColumnMetadata(name="name", data_type="VARCHAR"),
-            ColumnMetadata(name="price", data_type="FLOAT"),
-            ColumnMetadata(name="category", data_type="VARCHAR"),
-        ], table_schema="CREATE TABLE products (id INTEGER PRIMARY KEY, name VARCHAR, price FLOAT, category VARCHAR)"),
+        TableDescription(
+            table_name="employees",
+            columns=[
+                ColumnMetadata(name="id", data_type="INTEGER", is_primary_key=True),
+                ColumnMetadata(name="name", data_type="VARCHAR", description="Employee full name"),
+                ColumnMetadata(name="salary", data_type="FLOAT", description="Annual salary"),
+                ColumnMetadata(
+                    name="department_id",
+                    data_type="INTEGER",
+                    is_foreign_key=True,
+                    foreign_key_ref="departments.id",
+                ),
+                ColumnMetadata(name="hire_date", data_type="DATE"),
+            ],
+            table_schema="CREATE TABLE employees (id INTEGER PRIMARY KEY, name VARCHAR, salary FLOAT, department_id INTEGER, hire_date DATE)",
+            description="Employee records",
+        ),
+        TableDescription(
+            table_name="departments",
+            columns=[
+                ColumnMetadata(name="id", data_type="INTEGER", is_primary_key=True),
+                ColumnMetadata(name="name", data_type="VARCHAR", description="Department name"),
+                ColumnMetadata(name="location", data_type="VARCHAR"),
+            ],
+            table_schema="CREATE TABLE departments (id INTEGER PRIMARY KEY, name VARCHAR, location VARCHAR)",
+            description="Department info",
+        ),
+        TableDescription(
+            table_name="sales",
+            columns=[
+                ColumnMetadata(name="id", data_type="INTEGER", is_primary_key=True),
+                ColumnMetadata(
+                    name="product_id",
+                    data_type="INTEGER",
+                    is_foreign_key=True,
+                    foreign_key_ref="products.id",
+                ),
+                ColumnMetadata(
+                    name="employee_id",
+                    data_type="INTEGER",
+                    is_foreign_key=True,
+                    foreign_key_ref="employees.id",
+                ),
+                ColumnMetadata(name="quantity", data_type="INTEGER"),
+                ColumnMetadata(name="amount", data_type="FLOAT", description="Total sale amount"),
+            ],
+            table_schema="CREATE TABLE sales (id INTEGER PRIMARY KEY, product_id INTEGER, employee_id INTEGER, quantity INTEGER, amount FLOAT)",
+        ),
+        TableDescription(
+            table_name="products",
+            columns=[
+                ColumnMetadata(name="id", data_type="INTEGER", is_primary_key=True),
+                ColumnMetadata(name="name", data_type="VARCHAR"),
+                ColumnMetadata(name="price", data_type="FLOAT"),
+                ColumnMetadata(name="category", data_type="VARCHAR"),
+            ],
+            table_schema="CREATE TABLE products (id INTEGER PRIMARY KEY, name VARCHAR, price FLOAT, category VARCHAR)",
+        ),
     ]

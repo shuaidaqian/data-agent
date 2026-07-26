@@ -2,11 +2,12 @@ import pytest
 from unittest.mock import MagicMock
 from sql_agent.agent.tools import AgentToolkit
 
+
 class TestAgentToolkit:
     @pytest.fixture
     def toolkit(self, sql_database, sample_table_descriptions):
         mock_llm = MagicMock()
-        mock_llm.embed.return_value = [[0.5]*10]
+        mock_llm.embed.return_value = [[0.5] * 10]
         return AgentToolkit(
             database=sql_database,
             db_scan=sample_table_descriptions,

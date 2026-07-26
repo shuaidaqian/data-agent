@@ -1,0 +1,18 @@
+[tool.black]
+line-length = 100
+target-version = ["py311"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+exclude = [
+    ".git",
+    ".pytest_cache",
+    ".ruff_cache",
+    "services",
+]
+
+[tool.ruff.lint]
+# 先用稳定的基础规则守住 CI：语法错误、未定义名、未使用导入等。
+# 暂不启用上游 Dataherald 的全量严格规则，避免把历史参考代码和原型代码一次性重构几百处。
+select = ["E4", "E7", "E9", "F"]

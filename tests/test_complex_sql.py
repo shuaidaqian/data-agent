@@ -1,5 +1,5 @@
-import pytest
 from sql_agent.sql.complex_sql import ComplexSQLDecomposer
+
 
 class TestComplexSQL:
     def test_is_complex_join(self):

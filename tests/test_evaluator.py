@@ -2,6 +2,7 @@ import pytest
 from sql_agent.eval.evaluator import SimpleEvaluator
 from sql_agent.core.config import Settings, System
 
+
 class TestSimpleEvaluator:
     @pytest.fixture
     def evaluator(self):

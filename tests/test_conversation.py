@@ -1,5 +1,5 @@
-import pytest
 from sql_agent.context.conversation import ConversationManager
+
 
 class TestConversationManager:
     def test_create(self):
@@ -34,7 +34,9 @@ class TestConversationManager:
         mgr = ConversationManager()
         conv = mgr.create_conversation("db1")
         mgr.add_turn(conv, "user", "Show departments")
-        mgr.add_turn(conv, "assistant", "SELECT * FROM departments", sql="SELECT * FROM departments")
+        mgr.add_turn(
+            conv, "assistant", "SELECT * FROM departments", sql="SELECT * FROM departments"
+        )
         ctx = mgr.build_context_prompt(conv, "Show employees")
         assert "departments" in ctx
         assert "SELECT" in ctx
@@ -57,7 +59,7 @@ class TestConversationManager:
     def test_delete(self):
         mgr = ConversationManager()
         conv = mgr.create_conversation("db1")
-        assert mgr.delete_conversation(str(conv.id) if conv.id else 'fake')
+        assert mgr.delete_conversation(str(conv.id) if conv.id else "fake")
 
     def test_summary(self):
         mgr = ConversationManager()

@@ -1,6 +1,7 @@
 import pytest
 from sql_agent.sql.database import SQLInjectionError
 
+
 class TestSQLDatabase:
     def test_run_simple(self, sql_database):
         _, result = sql_database.run_sql("SELECT COUNT(*) as cnt FROM employees")

@@ -1,6 +1,7 @@
 import pytest
 from sql_agent.sql.schema_linking import SchemaLinker
 
+
 class TestSchemaLinker:
     @pytest.fixture
     def linker(self, sample_table_descriptions):

@@ -1,12 +1,12 @@
-import pytest
-from datetime import datetime
 from sql_agent.core.types import Prompt, SQLGeneration, Conversation, ConversationTurn, SQLStatus
+
 
 class TestPrompt:
     def test_create(self):
         p = Prompt(text="Show all employees", db_connection_id="db1")
         assert p.text == "Show all employees"
         assert p.db_connection_id == "db1"
+
 
 class TestSQLGeneration:
     def test_default_status(self):
@@ -20,9 +20,15 @@ class TestSQLGeneration:
         assert gen.sql_before_correction is None
 
     def test_correction_fields(self):
-        gen = SQLGeneration(prompt_id="p1", sql="SELECT * FROM t", sql_before_correction="SELECT * FROM wrong", correction_rounds=2)
+        gen = SQLGeneration(
+            prompt_id="p1",
+            sql="SELECT * FROM t",
+            sql_before_correction="SELECT * FROM wrong",
+            correction_rounds=2,
+        )
         assert gen.correction_rounds == 2
         assert gen.sql_before_correction == "SELECT * FROM wrong"
+
 
 class TestConversation:
     def test_add_turns(self):

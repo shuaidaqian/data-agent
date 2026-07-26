@@ -1,5 +1,6 @@
 import pytest
 
+
 class TestIntegration:
     def test_join_query(self, sql_database):
         _, r = sql_database.run_sql(
@@ -37,15 +38,19 @@ class TestIntegration:
 
     def test_schema_linking_join(self, sample_table_descriptions):
         from sql_agent.sql.schema_linking import SchemaLinker
+
         linker = SchemaLinker(sample_table_descriptions)
         paths = linker.find_join_paths(["employees", "departments", "sales"])
         assert len(paths) >= 2
 
     def test_conversation_pipeline(self):
         from sql_agent.context.conversation import ConversationManager
+
         mgr = ConversationManager()
         conv = mgr.create_conversation("db1")
         mgr.add_turn(conv, "user", "Show departments")
-        mgr.add_turn(conv, "assistant", "SELECT * FROM departments", sql="SELECT * FROM departments")
+        mgr.add_turn(
+            conv, "assistant", "SELECT * FROM departments", sql="SELECT * FROM departments"
+        )
         ctx = mgr.build_context_prompt(conv, "Show employees")
         assert "departments" in ctx

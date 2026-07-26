@@ -3,6 +3,7 @@ SQL Agent - 自然语言转 SQL 引擎
 
 FastAPI 应用入口。
 """
+
 from __future__ import annotations
 
 import logging
@@ -19,50 +20,51 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 load_dotenv()
 
 logging.basicConfig(
-     level=logging.INFO,
-     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    level=logging.INFO,
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
 )
 
 logger = logging.getLogger(__name__)
 
 
 def create_app() -> FastAPI:
-     """创建并配置 FastAPI 应用"""
-     app = FastAPI(
-         title="SQL Agent API",
-         description="Natural Language to SQL Engine",
-         version="0.1.0",
-     )
+    """创建并配置 FastAPI 应用"""
+    app = FastAPI(
+        title="SQL Agent API",
+        description="Natural Language to SQL Engine",
+        version="0.1.0",
+    )
 
-     # 跨域配置
-     app.add_middleware(
-         CORSMiddleware,
-         allow_origins=["*"],
-         allow_credentials=True,
-         allow_methods=["*"],
-         allow_headers=["*"],
-     )
+    # 跨域配置
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["*"],
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
 
-     # 导入并挂载 API 路由
-     from sql_agent.api.routes import router
-     app.include_router(router)
+    # 导入并挂载 API 路由
+    from sql_agent.api.routes import router
 
-     @app.get("/")
-     async def root():
-         return {
-             "service": "SQL Agent",
-             "version": "0.1.0",
-             "docs": "/docs",
-         }
+    app.include_router(router)
 
-     return app
+    @app.get("/")
+    async def root():
+        return {
+            "service": "SQL Agent",
+            "version": "0.1.0",
+            "docs": "/docs",
+        }
+
+    return app
 
 
 app = create_app()
 
 
 if __name__ == "__main__":
-     host = os.getenv("HOST", "0.0.0.0")
-     port = int(os.getenv("PORT", "8000"))
-     logger.info(f"Starting SQL Agent on {host}:{port}")
-     uvicorn.run("main:app", host=host, port=port, reload=True)
+    host = os.getenv("HOST", "0.0.0.0")
+    port = int(os.getenv("PORT", "8000"))
+    logger.info(f"Starting SQL Agent on {host}:{port}")
+    uvicorn.run("main:app", host=host, port=port, reload=True)

@@ -10,11 +10,12 @@
 
 该模块会将复杂查询拆解为更简单的子问题。
 """
+
 from __future__ import annotations
 
 import logging
 import re
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
 from sql_agent.llm.base import LLMBackend
 
@@ -49,74 +50,99 @@ Output the final SQL inside a ```sql block.
 
 
 class ComplexSQLDecomposer:
-     """
-     将复杂 SQL 查询拆解为更简单的部分。
-     使用先分解、再组合的策略。
-     """
+    """
+    将复杂 SQL 查询拆解为更简单的部分。
+    使用先分解、再组合的策略。
+    """
 
-     def __init__(self, llm: LLMBackend):
-         self.llm = llm
+    def __init__(self, llm: LLMBackend):
+        self.llm = llm
 
-     def decompose_and_generate(
-         self,
-         question: str,
-         schema_info: str,
-         table_descriptions: List,
-     ) -> Optional[Dict[str, Any]]:
-         """
-         分解复杂问题并生成 SQL。
-         返回包含 sql、sub_questions 和 explanation 的字典。
-         """
-         prompt = COMPLEX_SQL_PROMPT.format(
-             question=question,
-             schema_info=schema_info,
-         )
+    def decompose_and_generate(
+        self,
+        question: str,
+        schema_info: str,
+        table_descriptions: List,
+    ) -> Optional[Dict[str, Any]]:
+        """
+        分解复杂问题并生成 SQL。
+        返回包含 sql、sub_questions 和 explanation 的字典。
+        """
+        prompt = COMPLEX_SQL_PROMPT.format(
+            question=question,
+            schema_info=schema_info,
+        )
 
-         response = self.llm.generate([{"role": "user", "content": prompt}])
+        response = self.llm.generate([{"role": "user", "content": prompt}])
 
-         # 提取 SQL
-         sql_match = re.search(r"```sql\s*(.*?)\s*```", response, re.DOTALL)
-         sql = sql_match.group(1).strip() if sql_match else None
+        # 提取 SQL
+        sql_match = re.search(r"```sql\s*(.*?)\s*```", response, re.DOTALL)
+        sql = sql_match.group(1).strip() if sql_match else None
 
-         return {
-             "sql": sql,
-             "raw_response": response,
-         }
+        return {
+            "sql": sql,
+            "raw_response": response,
+        }
 
-     @staticmethod
-     def is_complex_query(question: str) -> bool:
-         """
-         使用启发式规则快速判断问题是否需要复杂 SQL。
-         """
-         text = question.lower()
-         complex_indicators = [
-             # 多表查询
-             " and ", " each ", " per ", " compared to ", " versus ",
-             # 聚合
-             " average ", " median ", " standard deviation ", " variance ",
-             " moving average ", " running total ", " cumulative ",
-             # 时间序列
-             " month over month", " month-over-month", " quarter over quarter",
-             "同比", "环比", " year to date ", " year-over-year ",
-             # 排名
-             " top 3", " top 5", " top 10", " bottom ", " rank ",
-             " highest ", " lowest ", " most ", " least ",
-             # 对比
-             " percentage ", " proportion ", " ratio ", " share of ",
-             " compare ", " difference between ",
-         ]
-         return any(indicator in text for indicator in complex_indicators)
+    @staticmethod
+    def is_complex_query(question: str) -> bool:
+        """
+        使用启发式规则快速判断问题是否需要复杂 SQL。
+        """
+        text = question.lower()
+        complex_indicators = [
+            # 多表查询
+            " and ",
+            " each ",
+            " per ",
+            " compared to ",
+            " versus ",
+            # 聚合
+            " average ",
+            " median ",
+            " standard deviation ",
+            " variance ",
+            " moving average ",
+            " running total ",
+            " cumulative ",
+            # 时间序列
+            " month over month",
+            " month-over-month",
+            " quarter over quarter",
+            "同比",
+            "环比",
+            " year to date ",
+            " year-over-year ",
+            # 排名
+            " top 3",
+            " top 5",
+            " top 10",
+            " bottom ",
+            " rank ",
+            " highest ",
+            " lowest ",
+            " most ",
+            " least ",
+            # 对比
+            " percentage ",
+            " proportion ",
+            " ratio ",
+            " share of ",
+            " compare ",
+            " difference between ",
+        ]
+        return any(indicator in text for indicator in complex_indicators)
 
-     @staticmethod
-     def get_query_type(question: str) -> str:
-         """分类所需 SQL 查询类型"""
-         text = question.lower()
-         if any(w in text for w in ["month over month", "环比", "同比", "trend", "趋势"]):
-             return "time_series"
-         if any(w in text for w in ["compare", "对比", "versus", "vs"]):
-             return "comparison"
-         if any(w in text for w in ["rank", "top", "bottom", "排名"]):
-             return "ranking"
-         if any(w in text for w in ["percentage", "proportion", "ratio", "占比", "比例"]):
-             return "aggregation_ratio"
-         return "general"
+    @staticmethod
+    def get_query_type(question: str) -> str:
+        """分类所需 SQL 查询类型"""
+        text = question.lower()
+        if any(w in text for w in ["month over month", "环比", "同比", "trend", "趋势"]):
+            return "time_series"
+        if any(w in text for w in ["compare", "对比", "versus", "vs"]):
+            return "comparison"
+        if any(w in text for w in ["rank", "top", "bottom", "排名"]):
+            return "ranking"
+        if any(w in text for w in ["percentage", "proportion", "ratio", "占比", "比例"]):
+            return "aggregation_ratio"
+        return "general"

@@ -2,6 +2,7 @@
 SQL 生成结果评估器。
 为生成的 SQL 提供置信度评分。
 """
+
 from __future__ import annotations
 
 import logging
@@ -33,82 +34,84 @@ Feedback: [brief explanation]
 
 
 class Evaluator(Component):
-     """评估生成 SQL 的质量和置信度"""
+    """评估生成 SQL 的质量和置信度"""
 
-     def __init__(self, system: System):
-         super().__init__(system)
-         self.llm = None
-         self.llm_config: Optional[LLMConfig] = None
+    def __init__(self, system: System):
+        super().__init__(system)
+        self.llm = None
+        self.llm_config: Optional[LLMConfig] = None
 
-     def get_confidence_score(
-         self,
-         user_prompt: Prompt,
-         sql_generation: SQLGeneration,
-         metadata: Optional[Dict[str, Any]] = None,
-     ) -> Optional[float]:
-         """计算生成 SQL 的置信度分数"""
-         if not sql_generation.sql or sql_generation.status in (SQLStatus.INVALID, "INVALID"):
-             return 0.0
+    def get_confidence_score(
+        self,
+        user_prompt: Prompt,
+        sql_generation: SQLGeneration,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> Optional[float]:
+        """计算生成 SQL 的置信度分数"""
+        if not sql_generation.sql or sql_generation.status in (SQLStatus.INVALID, "INVALID"):
+            return 0.0
 
-         if not self.llm:
-             from sql_agent.llm.base import LLMBackend
-             self.llm = self.system.instance(LLMBackend)
+        if not self.llm:
+            from sql_agent.llm.base import LLMBackend
 
-         cfg = self.llm_config or LLMConfig()
+            self.llm = self.system.instance(LLMBackend)
 
-         prompt = EVALUATION_PROMPT.format(
-             question=user_prompt.text,
-             sql=sql_generation.sql,
-         )
+        cfg = self.llm_config or LLMConfig()
 
-         try:
-             response = self.llm.generate([{"role": "user", "content": prompt}], config=cfg)
-             score = self._parse_score(response)
-             logger.info(f"Evaluation score: {score}")
-             return score
-         except Exception as e:
-             logger.warning(f"Evaluation failed: {e}")
-             return None
+        prompt = EVALUATION_PROMPT.format(
+            question=user_prompt.text,
+            sql=sql_generation.sql,
+        )
 
-     def evaluate(self, sql: str, question: str) -> float:
-         """使用统一评估接口评估 SQL"""
-         generation = SQLGeneration(prompt_id="", sql=sql, status=SQLStatus.PENDING)
-         score = self.get_confidence_score(Prompt(text=question), generation)
-         return 0.0 if score is None else score
+        try:
+            response = self.llm.generate([{"role": "user", "content": prompt}], config=cfg)
+            score = self._parse_score(response)
+            logger.info(f"Evaluation score: {score}")
+            return score
+        except Exception as e:
+            logger.warning(f"Evaluation failed: {e}")
+            return None
 
-     def _parse_score(self, response: str) -> Optional[float]:
-         """从 LLM 响应中解析总体分数"""
-         import re
-         match = re.search(r"Overall:\s*([0-9.]+)", response)
-         if match:
-             return float(match.group(1))
-         return None
+    def evaluate(self, sql: str, question: str) -> float:
+        """使用统一评估接口评估 SQL"""
+        generation = SQLGeneration(prompt_id="", sql=sql, status=SQLStatus.PENDING)
+        score = self.get_confidence_score(Prompt(text=question), generation)
+        return 0.0 if score is None else score
+
+    def _parse_score(self, response: str) -> Optional[float]:
+        """从 LLM 响应中解析总体分数"""
+        import re
+
+        match = re.search(r"Overall:\s*([0-9.]+)", response)
+        if match:
+            return float(match.group(1))
+        return None
 
 
 class SimpleEvaluator(Evaluator):
-     """
-     简单启发式评估器，用于不希望调用 LLM 评估的场景。
-     检查 SQL 语法、关键词存在性和基础结构。
-     """
+    """
+    简单启发式评估器，用于不希望调用 LLM 评估的场景。
+    检查 SQL 语法、关键词存在性和基础结构。
+    """
 
-     def __init__(self, system: System):
-         super().__init__(system)
+    def __init__(self, system: System):
+        super().__init__(system)
 
-     def evaluate(self, sql: str, question: str) -> float:
-         """简单启发式打分"""
-         score = 0.5  # 基础分
+    def evaluate(self, sql: str, question: str) -> float:
+        """简单启发式打分"""
+        score = 0.5  # 基础分
 
-         # 包含 SELECT 时加分，表示基本像一个查询
-         if "SELECT" in sql.upper():
-             score += 0.2
-         else:
-             score -= 0.3
+        # 包含 SELECT 时加分，表示基本像一个查询
+        if "SELECT" in sql.upper():
+            score += 0.2
+        else:
+            score -= 0.3
 
-         # 对常见结构问题扣分
-         if "FROM" not in sql.upper():
-             score -= 0.2
+        # 对常见结构问题扣分
+        if "FROM" not in sql.upper():
+            score -= 0.2
 
-         if ";" in sql.rstrip()[:-1]:
-             score -= 0.1
+        if ";" in sql.rstrip()[:-1]:
+            score -= 0.1
 
-         return max(0.0, min(1.0, score))
+        return max(0.0, min(1.0, score))

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any, AsyncIterator, Dict, List, Optional
 
-from sql_agent.core.config import Component, System
+from sql_agent.core.config import System
 from sql_agent.llm.base import LLMBackend
 from sql_agent.storage.db import StorageBackend
 from sql_agent.storage.vector import VectorBackend
