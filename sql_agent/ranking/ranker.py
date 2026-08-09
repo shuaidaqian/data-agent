@@ -24,7 +24,9 @@ class CandidateRanker:
         self.evaluator = evaluator
         self._tables = self._build_table_index(table_descriptions)
 
-    def rank(self, question: str, candidates: Iterable[str], limit: Optional[int] = None) -> List[SQLCandidate]:
+    def rank(
+        self, question: str, candidates: Iterable[str], limit: Optional[int] = None
+    ) -> List[SQLCandidate]:
         ranked = [self._score_candidate(question, sql) for sql in self._deduplicate(candidates)]
         ranked.sort(key=lambda candidate: candidate.score, reverse=True)
         return ranked[:limit] if limit else ranked
@@ -96,7 +98,9 @@ class CandidateRanker:
         return 0.0
 
     def _build_evidence(self, candidate: SQLCandidate) -> str:
-        columns = ", ".join(candidate.execution.columns) if candidate.execution.columns else "无列信息"
+        columns = (
+            ", ".join(candidate.execution.columns) if candidate.execution.columns else "无列信息"
+        )
         return (
             f"执行成功，返回 {candidate.execution.row_count} 行；"
             f"结果列：{columns}；"
@@ -132,7 +136,9 @@ class CandidateRanker:
         except Exception:
             return []
 
-    def _build_table_index(self, table_descriptions: List[TableDescription]) -> Dict[str, TableDescription]:
+    def _build_table_index(
+        self, table_descriptions: List[TableDescription]
+    ) -> Dict[str, TableDescription]:
         index = {}
         for table in table_descriptions:
             names = [table.table_name]

@@ -207,7 +207,9 @@ class SchemaScanner:
         if "date" in name or "time" in name or any(t in data_type for t in ["date", "time"]):
             synonyms.extend(["日期", "时间"])
             return "date", synonyms
-        if any(token in name for token in ["amount", "price", "salary", "quantity", "total", "count"]):
+        if any(
+            token in name for token in ["amount", "price", "salary", "quantity", "total", "count"]
+        ):
             synonyms.extend(["数值", "指标", "金额"])
             return "measure", synonyms
         if any(token in name for token in ["name", "title", "label"]):

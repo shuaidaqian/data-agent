@@ -10,7 +10,9 @@ class CandidateGenerator:
     """从主 SQL 和中间步骤中收集候选 SQL。"""
 
     @staticmethod
-    def collect(primary_sql: Optional[str], step_texts: Optional[Iterable[str]] = None) -> List[str]:
+    def collect(
+        primary_sql: Optional[str], step_texts: Optional[Iterable[str]] = None
+    ) -> List[str]:
         candidates: List[str] = []
         if primary_sql:
             candidates.append(primary_sql)

@@ -27,7 +27,9 @@ def test_schema_scanner_adds_column_semantics_and_synonyms(sql_database):
     ][0]
 
     salary_column = next(column for column in employees.columns if column.name == "salary")
-    department_id_column = next(column for column in employees.columns if column.name == "department_id")
+    department_id_column = next(
+        column for column in employees.columns if column.name == "department_id"
+    )
     hire_date_column = next(column for column in employees.columns if column.name == "hire_date")
     name_column = next(column for column in employees.columns if column.name == "name")
 
