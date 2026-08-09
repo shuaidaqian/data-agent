@@ -8,7 +8,7 @@
 2. 再实现启发式 `ResultAnalyzer`，稳定生成 `answer`、`summary` 和 `key_findings`。
 3. 最后接入 `LLMResultAnalyzer`，让回答更自然，但必须严格 grounded。
 
-第一性原理判断：
+开发时的需求拆解：
 
 - 用户真正要的是问题答案，不是 SQL 字符串。
 - SQL 是取数计划，SQL 执行结果才是回答依据。
@@ -16,7 +16,7 @@
 - 系统负责执行 SQL，LLM 只能基于受控 SQL result 做表达。
 - 每个分析结论必须能追溯到 SQL result evidence。
 
-对抗式审查判断：
+开发时的风险审查：
 
 - 如果 LLM 生成了不可解析 JSON，不能接受。
 - 如果 LLM 给出关键发现但没有 evidence，不能接受。

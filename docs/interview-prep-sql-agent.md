@@ -518,7 +518,7 @@ python -m compileall -q sql_agent tests main.py
 
 回答：
 
-> 从第一性原理看，业务用户要的是问题答案，不是 SQL 字符串。只返回 SQL 对开发者有用，但对业务用户还不够完整，所以我把最优候选 SQL 的执行结果透出到 API，再由 ResultAnalyzer 生成 answer、summary 和 key findings。这里有一个关键边界：SQL 一定由系统执行，LLM 只能基于受控结果做表达；如果 LLM 分析结果时缺少 evidence 或编造 SQL result 中不存在的数字，就回退到启发式分析。
+> 从业务需求看，用户要的是问题答案，不是 SQL 字符串。只返回 SQL 对开发者有用，但对业务用户还不够完整，所以我把最优候选 SQL 的执行结果透出到 API，再由 ResultAnalyzer 生成 answer、summary 和 key findings。这里有一个关键边界：SQL 一定由系统执行，LLM 只能基于受控结果做表达；如果 LLM 分析结果时缺少 evidence 或编造 SQL result 中不存在的数字，就回退到启发式分析。
 
 ### 8. 怎么保证安全？
 
