@@ -49,6 +49,10 @@ class ColumnMetadata:
     low_cardinality: bool = False
     categories: Optional[List[str]] = None
     sample_values: Optional[List[str]] = None
+    semantic_type: Optional[str] = None
+    synonyms: List[str] = field(default_factory=list)
+    distinct_count: Optional[int] = None
+    null_count: Optional[int] = None
 
 
 @dataclass

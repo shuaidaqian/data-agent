@@ -49,6 +49,7 @@ class SQLResponse(BaseModel):
     confidence_score: Optional[float] = None
     conversation_id: Optional[str] = None
     intermediate_steps: Optional[List[Dict[str, str]]] = None
+    candidates: Optional[List[Dict[str, Any]]] = None
     error: Optional[str] = None
 
 
@@ -193,13 +194,11 @@ async def ask_question(request: QuestionRequest):
                 result.sql = corr_result.sql
                 result.status = "CORRECTED"
 
-        confidence_score = None
-        if result.sql:
-            confidence_score = evaluator.evaluate(result.sql, request.question)
-
         # 提取中间步骤
         steps = []
+        candidate_step_texts = []
         for step in getattr(result, "steps", []):
+            candidate_step_texts.extend([step.action_input, step.observation])
             steps.append(
                 {
                     "thought": step.thought,
@@ -207,6 +206,27 @@ async def ask_question(request: QuestionRequest):
                     "observation": step.observation[:200] if step.observation else "",
                 }
             )
+
+        # 候选 SQL 排序与执行证据
+        ranked_candidates = []
+        confidence_score = None
+        if result.sql:
+            from sql_agent.ranking.generator import CandidateGenerator
+            from sql_agent.ranking.ranker import CandidateRanker
+
+            candidate_sqls = CandidateGenerator.collect(result.sql, candidate_step_texts)
+            ranked_candidates = CandidateRanker(
+                database=database,
+                table_descriptions=table_descriptions,
+                evaluator=evaluator,
+            ).rank(request.question, candidate_sqls)
+            if ranked_candidates:
+                best_candidate = ranked_candidates[0]
+                result.sql = best_candidate.sql
+                result.status = best_candidate.status
+                confidence_score = best_candidate.score
+            else:
+                confidence_score = evaluator.evaluate(result.sql, request.question)
 
         # 保存到对话历史
         conv_mgr.add_turn(conversation, "user", request.question)
@@ -224,6 +244,7 @@ async def ask_question(request: QuestionRequest):
             confidence_score=confidence_score,
             conversation_id=conversation.id,
             intermediate_steps=steps,
+            candidates=[candidate.to_dict() for candidate in ranked_candidates],
             error=result.error,
         )
 

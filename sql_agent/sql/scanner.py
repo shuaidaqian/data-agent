@@ -84,6 +84,8 @@ class SchemaScanner:
             full_name = f"{schema_name}.{table_name}" if schema_name else table_name
             row_count = self._row_count(full_name)
             self._apply_column_samples(full_name, columns)
+            self._apply_column_statistics(full_name, columns)
+            self._apply_column_semantics(columns)
 
             # 构建类似 DDL 的表结构文本
             table_schema = (
@@ -162,6 +164,64 @@ class SchemaScanner:
                 except Exception as e:
                     logger.debug(f"Failed to sample {full_name}.{column.name}: {e}")
 
+    def _apply_column_statistics(self, full_name: str, columns: List[ColumnMetadata]) -> None:
+        """采集列级统计信息，用于后续排序和解释。"""
+        table_ref = self._quote_table(full_name)
+        with self.database._engine.connect() as conn:
+            for column in columns:
+                try:
+                    column_ref = self._quote_identifier(column.name)
+                    result = conn.execute(
+                        sa_text(
+                            f"SELECT "
+                            f"COUNT(DISTINCT {column_ref}) AS distinct_count, "
+                            f"SUM(CASE WHEN {column_ref} IS NULL THEN 1 ELSE 0 END) AS null_count "
+                            f"FROM {table_ref}"
+                        )
+                    )
+                    row = result.fetchone()
+                    if row:
+                        column.distinct_count = int(row._mapping["distinct_count"] or 0)
+                        column.null_count = int(row._mapping["null_count"] or 0)
+                except Exception as e:
+                    logger.debug(f"Failed to profile {full_name}.{column.name}: {e}")
+
+    def _apply_column_semantics(self, columns: List[ColumnMetadata]) -> None:
+        """基于列名、类型和关系生成轻量语义标签。"""
+        for column in columns:
+            semantic_type, synonyms = self._infer_column_semantics(column)
+            column.semantic_type = semantic_type
+            column.synonyms = synonyms
+
+    def _infer_column_semantics(self, column: ColumnMetadata) -> tuple[str, List[str]]:
+        name = column.name.lower()
+        data_type = column.data_type.lower()
+        synonyms = []
+
+        if column.is_foreign_key:
+            synonyms.extend(["关联键", "外键", "引用"])
+            return "foreign_key", synonyms
+        if column.is_primary_key or name == "id" or name.endswith("_id"):
+            synonyms.extend(["标识", "编号", "主键"])
+            return "identifier", synonyms
+        if "date" in name or "time" in name or any(t in data_type for t in ["date", "time"]):
+            synonyms.extend(["日期", "时间"])
+            return "date", synonyms
+        if any(token in name for token in ["amount", "price", "salary", "quantity", "total", "count"]):
+            synonyms.extend(["数值", "指标", "金额"])
+            return "measure", synonyms
+        if any(token in name for token in ["name", "title", "label"]):
+            synonyms.extend(["名称", "名字", "文本"])
+            return "name", synonyms
+        if column.low_cardinality or any(token in name for token in ["status", "category", "type"]):
+            synonyms.extend(["分类", "枚举", "状态"])
+            return "category", synonyms
+        if any(t in data_type for t in ["int", "float", "numeric", "decimal", "real"]):
+            synonyms.extend(["数值", "指标"])
+            return "measure", synonyms
+        synonyms.append("文本")
+        return "text", synonyms
+
     def _row_count(self, full_name: str) -> Optional[int]:
         try:
             with self.database._engine.connect() as conn:
@@ -178,6 +238,11 @@ class SchemaScanner:
             if column.sample_values:
                 values = ", ".join(column.sample_values)
                 lines.append(f"/* Column `{column.name}` sample values: {values} */")
+            if column.semantic_type:
+                lines.append(
+                    f"/* Column `{column.name}` semantic type: {column.semantic_type}; "
+                    f"synonyms: {', '.join(column.synonyms)} */"
+                )
         return "\n".join(lines)
 
     def _quote_table(self, full_name: str) -> str:

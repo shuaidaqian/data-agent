@@ -70,6 +70,11 @@ SQL 生成
 DAIL / DIN Self-Correction
   |
   v
+CandidateRanker
+  |-- 候选 SQL 执行验证
+  |-- 证据化评分排序
+  |
+  v
 最终 SQL
 ```
 
@@ -83,7 +88,8 @@ DAIL / DIN Self-Correction
 6. Agent 通过 `AgentToolkit` 调用数据库工具进行观察和验证。
 7. LLM 输出 SQL。
 8. `DAILStyleCorrector` 根据执行结果进行迭代修正。
-9. API 返回 SQL、状态、中间步骤和错误信息。
+9. `CandidateRanker` 对候选 SQL 做 schema 校验、执行验证和证据化排序。
+10. API 返回 SQL、状态、中间步骤、候选证据和错误信息。
 
 ## 项目结构
 
@@ -95,6 +101,7 @@ sql_agent/
 ├── context/       # 上下文管理，包括多轮对话、few-shot 检索和管理员指令
 ├── sql/           # 数据库层，包括 SQL 执行、Schema 扫描、Schema Linking、复杂 SQL 分解
 ├── correction/    # SQL 自纠错模块，包括 DIN-SQL 和 DAIL-SQL 风格修正器
+├── ranking/       # 候选 SQL 排序、执行证据和评分选择
 ├── storage/       # 存储层，包括 MongoDB 文档存储和 ChromaDB 向量存储
 ├── eval/          # SQL 质量评估器
 └── api/           # FastAPI REST 路由
@@ -112,7 +119,7 @@ services/          # Dataherald 原始多服务参考实现或源码镜像
 `sql_agent/core/types.py` 定义了整个系统的数据契约，主要包括：
 
 - `DatabaseConnection`：数据库连接配置。
-- `ColumnMetadata`：列级元数据，包括类型、描述、主键、外键、样本值等。
+- `ColumnMetadata`：列级元数据，包括类型、描述、主键、外键、样本值、语义类型、同义词和统计信息等。
 - `TableDescription`：表结构描述，包括表名、schema、列信息、DDL 和扫描状态。
 - `Prompt`：用户单轮自然语言问题。
 - `Conversation` / `ConversationTurn`：多轮对话会话和历史轮次。
@@ -212,6 +219,8 @@ services/          # Dataherald 原始多服务参考实现或源码镜像
 - 获取表和视图。
 - 获取列名、类型、主键、外键。
 - 采集列级样本值、低基数分类值和表行数。
+- 采集 distinct/null 统计。
+- 基于列名、类型、主外键和样本值推断列级语义类型与同义词。
 - 构造 `TableDescription`。
 - 生成类似 `CREATE TABLE` 的 schema 文本，并追加列样本上下文。
 
@@ -282,6 +291,21 @@ services/          # Dataherald 原始多服务参考实现或源码镜像
 
 后续可以接入更完整的评测集，例如 Spider、BIRD 或企业内部 Golden SQL 集合。
 
+### 10. 候选 SQL 排序层
+
+`sql_agent/ranking/` 将单次 SQL 输出升级为候选决策流程。
+
+当前能力包括：
+
+- 从 Agent 主输出和中间步骤中收集候选 SQL。
+- 对候选 SQL 做规范化去重。
+- 执行危险 SQL 拦截和 schema 白名单校验。
+- 执行候选 SQL，收集行数、列名、结果预览和错误。
+- 根据 schema 校验、执行结果、SQL 结构、问题意图和 Evaluator 分数综合排序。
+- 向 API 返回 `candidates` 字段，让最终 SQL 的选择过程可解释。
+
+这层是项目从“LLM 直接生成 SQL”走向“Data Agent 基于证据决策”的关键增强。
+
 ## API 端点
 
 | 方法 | 路径 | 说明 |
@@ -330,6 +354,7 @@ pytest -q tests
 - Schema Linking 和 JOIN 路径发现。
 - ConversationManager 多轮上下文构造。
 - FastAPI `/api/v1/question` + SQLite + MockLLM 端到端链路。
+- 候选 SQL 执行验证、证据化评分和排序。
 - Agent 基类、复杂度判断和工具函数。
 - SQL 注入拦截。
 - 工具层 schema 白名单校验。
@@ -341,7 +366,7 @@ pytest -q tests
 当前本地测试结果：
 
 ```text
-81 passed, 3 skipped, 2 warnings
+84 passed, 3 skipped, 2 warnings
 ```
 
 其中 3 个 skipped 是真实 OpenAI、MongoDB、ChromaDB 集成测试，默认需要设置 `RUN_REAL_INTEGRATIONS=true` 才运行。2 个 warnings 分别来自当前 FastAPI TestClient/httpx 组合的弃用提示，以及当前工作区 `.pytest_cache` 写入权限提示。
@@ -362,9 +387,10 @@ pytest -q
 
 1. Azure OpenAI 分支使用了 `azure_api_version`，但配置类中还需要补充该字段。
 2. `SqlDbQuery` 复杂多表查询目前主要校验表名，列级白名单对 alias、聚合表达式、复杂子查询仍采取保守策略，后续可引入更稳定的 SQL AST 解析。
-3. MongoDB 会话存储目前按普通 dict/datetime 写入，后续如果引入更复杂对象，需要统一序列化策略。
-4. 真实 OpenAI、MongoDB、ChromaDB 集成测试已经补充，但默认跳过，需要在具备凭据和外部服务的环境中通过 `RUN_REAL_INTEGRATIONS=true` 显式执行。
-5. 全仓库测试仍受 `services/engine` 原始 Dataherald 子项目依赖影响，需要单独安装该子项目依赖，或配置 pytest 默认只收集根目录重构版测试。
+3. 候选 SQL 当前主要来自 Agent 主输出和中间步骤，后续可以扩展为多策略主动生成候选。
+4. MongoDB 会话存储目前按普通 dict/datetime 写入，后续如果引入更复杂对象，需要统一序列化策略。
+5. 真实 OpenAI、MongoDB、ChromaDB 集成测试已经补充，但默认跳过，需要在具备凭据和外部服务的环境中通过 `RUN_REAL_INTEGRATIONS=true` 显式执行。
+6. 全仓库测试仍受 `services/engine` 原始 Dataherald 子项目依赖影响，需要单独安装该子项目依赖，或配置 pytest 默认只收集根目录重构版测试。
 
 这些边界不影响项目作为学习和展示 Agent 架构的价值，但在面试或简历中应如实表述为“原型系统”和“核心链路重构”，不要包装成完整生产级平台。
 
@@ -384,6 +410,7 @@ pytest -q
 2. **Schema 理解增强**
    - 使用 SQLAlchemy inspector 扫描表、列、主键和外键。
    - 构建外键关系图。
+   - 采集样本值、distinct/null 统计、语义类型和同义词。
    - 用 Schema Linking 辅助多表 JOIN 路径发现。
 
 3. **多轮对话能力**
@@ -395,6 +422,11 @@ pytest -q
    - SQL 生成后不是直接返回，而是执行验证。
    - 根据数据库报错或样本结果进行 DAIL-SQL 风格迭代修正。
    - 使用 DIN-SQL 风格 verify-then-fix 做语义层检查。
+
+5. **候选 SQL 证据化排序**
+   - 收集候选 SQL。
+   - 对候选做 schema 校验和真实执行。
+   - 根据执行证据、问题意图和评估分选择最优 SQL。
 
 更稳妥的项目表述：
 
@@ -416,6 +448,7 @@ pytest -q
 6. 阅读 `sql_agent/sql/schema_linking.py`，理解 JOIN 路径发现。
 7. 阅读 `sql_agent/context/conversation.py`，理解多轮上下文如何构造。
 8. 阅读 `sql_agent/correction/dail_style.py`，理解执行反馈驱动的 SQL 修正闭环。
+9. 阅读 `sql_agent/ranking/ranker.py`，理解候选 SQL 如何基于执行证据排序。
 
 ## 后续开发计划
 
@@ -430,6 +463,9 @@ pytest -q
 - [x] 完善 SchemaScanner 的样本值采集和列级上下文写入。
 - [x] 增加真实 OpenAI、MongoDB、ChromaDB 集成测试。
 - [ ] 在具备真实凭据和外部服务的环境中执行 OpenAI、MongoDB、ChromaDB 集成测试。
+- [x] 增加候选 SQL 执行验证、证据化评分和排序。
+- [x] 为 SchemaScanner 增加列级语义类型、同义词和统计信息。
+- [ ] 扩展多策略候选 SQL 主动生成。
 - [ ] 强化复杂多表 SQL 的 alias、表达式和子查询列级白名单校验。
 - [ ] 统一 MongoDB 会话和复杂对象的序列化策略。
 - [ ] 接入 Langfuse / LangSmith 做 Agent 推理链路追踪。

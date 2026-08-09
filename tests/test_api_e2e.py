@@ -61,6 +61,10 @@ def test_sqlite_mockllm_question_endpoint_uses_stored_connection_and_keeps_histo
     body = first.json()
     assert body["sql"] == "SELECT COUNT(*) AS cnt FROM employees"
     assert body["conversation_id"]
+    assert body["candidates"]
+    assert body["candidates"][0]["sql"] == "SELECT COUNT(*) AS cnt FROM employees"
+    assert body["candidates"][0]["status"] == "VALID"
+    assert "执行成功" in body["candidates"][0]["evidence"]
 
     second = client.post(
         "/api/v1/question",
