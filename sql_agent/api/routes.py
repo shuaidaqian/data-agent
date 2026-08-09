@@ -44,9 +44,12 @@ class QuestionRequest(BaseModel):
 
 
 class SQLResponse(BaseModel):
+    answer: Optional[str] = None
     sql: str
     status: str
     confidence_score: Optional[float] = None
+    result: Optional[Dict[str, Any]] = None
+    analysis: Optional[Dict[str, Any]] = None
     conversation_id: Optional[str] = None
     intermediate_steps: Optional[List[Dict[str, str]]] = None
     candidates: Optional[List[Dict[str, Any]]] = None
@@ -96,6 +99,15 @@ def get_conversation_manager(storage: Any):
 
         _conversation_manager = ConversationManager(storage=storage)
     return _conversation_manager
+
+
+def create_result_analyzer(system: System, llm: Any):
+    """根据配置创建结果分析器，默认使用稳定的启发式分析。"""
+    from sql_agent.analysis.result_analyzer import HeuristicResultAnalyzer, LLMResultAnalyzer
+
+    if system.settings.result_analyzer == "llm":
+        return LLMResultAnalyzer(llm)
+    return HeuristicResultAnalyzer()
 
 
 # ─── 健康检查 ───────────────────────────────────────────
@@ -210,6 +222,7 @@ async def ask_question(request: QuestionRequest):
         # 候选 SQL 排序与执行证据
         ranked_candidates = []
         confidence_score = None
+        analysis = None
         if result.sql:
             from sql_agent.ranking.generator import CandidateGenerator
             from sql_agent.ranking.ranker import CandidateRanker
@@ -225,6 +238,11 @@ async def ask_question(request: QuestionRequest):
                 result.sql = best_candidate.sql
                 result.status = best_candidate.status
                 confidence_score = best_candidate.score
+                if best_candidate.status == "VALID":
+                    analysis = create_result_analyzer(system, llm).analyze(
+                        request.question,
+                        best_candidate,
+                    )
             else:
                 confidence_score = evaluator.evaluate(result.sql, request.question)
 
@@ -239,9 +257,24 @@ async def ask_question(request: QuestionRequest):
         )
 
         return SQLResponse(
+            answer=analysis.answer if analysis else None,
             sql=result.sql or "",
             status=result.status,
             confidence_score=confidence_score,
+            result=analysis.result.__dict__ if analysis else None,
+            analysis=(
+                {
+                    "summary": analysis.summary,
+                    "key_findings": [
+                        {"claim": finding.claim, "evidence": finding.evidence}
+                        for finding in analysis.key_findings
+                    ],
+                    "limitations": analysis.limitations,
+                    "followup_questions": analysis.followup_questions,
+                }
+                if analysis
+                else None
+            ),
             conversation_id=conversation.id,
             intermediate_steps=steps,
             candidates=[candidate.to_dict() for candidate in ranked_candidates],

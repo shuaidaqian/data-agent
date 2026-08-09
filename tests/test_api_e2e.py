@@ -59,7 +59,13 @@ def test_sqlite_mockllm_question_endpoint_uses_stored_connection_and_keeps_histo
     )
     assert first.status_code == 200
     body = first.json()
+    assert body["answer"] == "当前查询结果为 1。"
     assert body["sql"] == "SELECT COUNT(*) AS cnt FROM employees"
+    assert body["result"]["columns"] == ["cnt"]
+    assert body["result"]["rows"] == [{"cnt": 1}]
+    assert body["analysis"]["key_findings"][0]["evidence"] == "SQL result: cnt = 1"
+    assert body["analysis"]["limitations"]
+    assert body["analysis"]["followup_questions"]
     assert body["conversation_id"]
     assert body["candidates"]
     assert body["candidates"][0]["sql"] == "SELECT COUNT(*) AS cnt FROM employees"
@@ -100,3 +106,41 @@ def test_question_endpoint_returns_404_for_unknown_database(monkeypatch):
         json={"question": "test", "db_connection_id": "missing", "enable_correction": False},
     )
     assert response.status_code == 404
+
+
+def test_question_endpoint_can_use_grounded_llm_result_analyzer(monkeypatch, tmp_path):
+    db_path = tmp_path / "api_llm_analysis.sqlite"
+    engine = create_engine(f"sqlite:///{db_path}")
+    Base.metadata.create_all(engine)
+    with engine.begin() as conn:
+        conn.execute(Employee.__table__.insert(), [{"id": 1, "name": "Alice"}])
+
+    monkeypatch.setenv("LLM_BACKEND", "tests.fakes.MockLLM")
+    monkeypatch.setenv("STORAGE_BACKEND", "tests.fakes.MemoryStorage")
+    monkeypatch.setenv("VECTOR_BACKEND", "tests.fakes.MemoryVectorStore")
+    monkeypatch.setenv("ENABLE_SELF_CORRECTION", "false")
+    monkeypatch.setenv("RESULT_ANALYZER", "llm")
+    MemoryStorage.reset()
+
+    from sql_agent.api.routes import reset_system
+
+    reset_system()
+    client = TestClient(create_app())
+    created = client.post(
+        "/api/v1/database-connections",
+        json={"alias": "local-sqlite", "connection_uri": f"sqlite:///{db_path}"},
+    )
+    response = client.post(
+        "/api/v1/question",
+        json={
+            "question": "员工数量是多少？",
+            "db_connection_id": created.json()["id"],
+            "enable_correction": False,
+            "agent_mode": "react",
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["answer"] == "当前员工总数为 1 人。"
+    assert body["analysis"]["key_findings"][0]["evidence"] == "SQL result: cnt = 1"

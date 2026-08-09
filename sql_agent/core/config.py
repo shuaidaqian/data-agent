@@ -82,6 +82,7 @@ class Settings:
             os_module.getenv("ENABLE_SELF_CORRECTION", "true").lower() == "true"
         )
         self.max_correction_rounds = int(os_module.getenv("MAX_CORRECTION_ROUNDS", "3"))
+        self.result_analyzer = os_module.getenv("RESULT_ANALYZER", "heuristic").lower()
         self.llm_backend = os_module.getenv("LLM_BACKEND", "sql_agent.llm.openai_llm.OpenAILLM")
         self.storage_backend = os_module.getenv(
             "STORAGE_BACKEND", "sql_agent.storage.db.MongoStorage"

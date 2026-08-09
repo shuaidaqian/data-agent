@@ -27,7 +27,7 @@
 
 更安全、也更像实习生真实经历的说法是：
 
-> 在神州数码实习期间，我参与了一个面向企业数据库问答的 Data Agent 原型项目，目标是降低业务人员写 SQL 的门槛。我主要负责核心 NL-to-SQL Agent 链路的设计与实现，包括 Schema 扫描、Agent 工具调用、多轮上下文、SQL 自纠错、候选 SQL 执行验证和证据化排序。项目以原型验证和内部 PoC 为主，使用 FastAPI、SQLAlchemy、OpenAI 接口、MongoDB/ChromaDB 抽象存储等技术栈。
+> 在神州数码实习期间，我参与了一个面向企业数据库问答的 Data Agent 原型项目，目标是降低业务人员写 SQL 和理解查询结果的门槛。我主要负责核心 NL-to-SQL / NL-to-data-answer Agent 链路的设计与实现，包括 Schema 扫描、Agent 工具调用、多轮上下文、SQL 自纠错、候选 SQL 执行验证、证据化排序和基于执行结果的 grounded 结果分析。项目以原型验证和内部 PoC 为主，使用 FastAPI、SQLAlchemy、OpenAI 接口、MongoDB/ChromaDB 抽象存储等技术栈。
 
 这样讲的好处：
 
@@ -40,11 +40,11 @@
 
 这个项目可以定位为：
 
-> 一个参考 Dataherald 架构并结合 Data Agent 思路重构的轻量级 NL-to-SQL Agent 系统。它不是简单让 LLM 一次性生成 SQL，而是把数据库环境感知、工具调用、Schema Linking、多轮记忆、执行反馈自纠错和候选 SQL 证据化排序串成一个可测试的工程闭环。
+> 一个参考 Dataherald 架构并结合 Data Agent 思路重构的轻量级 NL-to-SQL / NL-to-data-answer Agent 系统。它不是简单让 LLM 一次性生成 SQL，而是把数据库环境感知、工具调用、Schema Linking、多轮记忆、执行反馈自纠错、候选 SQL 证据化排序和 grounded 结果分析串成一个可测试的工程闭环。
 
 更面试化的版本：
 
-> 这个项目的亮点不是“我调了一个大模型生成 SQL”，而是“我围绕 LLM 不可靠这个事实，设计了 schema 感知、工具约束、执行反馈、自纠错和候选证据排序这一整套工程闭环”。
+> 这个项目的亮点不是“我调了一个大模型生成 SQL”，而是“我围绕 LLM 不可靠这个事实，设计了 schema 感知、工具约束、执行反馈、自纠错、候选证据排序和结果 grounded 分析这一整套工程闭环”。
 
 ## 必须背熟的主链路
 
@@ -63,14 +63,15 @@
 -> LLM 生成 SQL
 -> DAIL/DIN 自纠错
 -> CandidateRanker 执行验证和排序
--> API 返回最终 SQL + candidates 证据
+-> ResultAnalyzer 基于最优候选执行结果生成 answer/summary/key_findings
+-> API 返回最终 answer + SQL + result + analysis + candidates 证据
 ```
 
 ## 2 分钟项目故事
 
 你要能在 2 分钟内讲清楚：
 
-> 这个项目是为了解决企业内部业务人员不会写 SQL，但又需要查数的问题。传统方案要么依赖数据分析师手写 SQL，要么 BI 报表不够灵活。我们做的是一个轻量级 NL-to-SQL Data Agent：用户输入自然语言问题，系统先扫描数据库 Schema，构造表、列、主外键、样本值和列语义信息，然后 Agent 通过受控工具获取相关表结构、执行 SQL、拿到反馈，再生成或修正 SQL。为了避免盲信 LLM 的第一次输出，我还加入了候选 SQL 执行验证和证据化排序，让系统根据 schema 校验、执行结果和问题意图选择最优 SQL。
+> 这个项目是为了解决企业内部业务人员不会写 SQL，但又需要查数和理解结果的问题。传统方案要么依赖数据分析师手写 SQL，要么 BI 报表不够灵活。我们做的是一个轻量级 NL-to-SQL / NL-to-data-answer Data Agent：用户输入自然语言问题，系统先扫描数据库 Schema，构造表、列、主外键、样本值和列语义信息，然后 Agent 通过受控工具获取相关表结构、执行 SQL、拿到反馈，再生成或修正 SQL。为了避免盲信 LLM 的第一次输出，我加入了候选 SQL 执行验证和证据化排序，让系统根据 schema 校验、执行结果和问题意图选择最优 SQL。最后，系统会把最优候选的执行结果透出给 API，并基于这份受控结果生成 answer、summary 和 key findings，所以用户拿到的是可追溯的数据答案，而不只是 SQL 字符串。
 
 ## 推荐阅读顺序
 
@@ -222,6 +223,21 @@
 - 怎么排序。
 - 为什么这比直接返回 LLM 第一条 SQL 更可靠。
 
+### 11. 结果分析层
+
+文件：
+
+- `sql_agent/analysis/result_analyzer.py`
+- `sql_agent/analysis/types.py`
+
+这是把项目从 SQL 生成推进到数据问答的最新亮点，必须吃透：
+
+- `HeuristicResultAnalyzer` 如何基于执行结果生成稳定答案。
+- `LLMResultAnalyzer` 为什么不能接触数据库连接，只能消费 SQL result。
+- `key_findings.evidence` 为什么必须能追溯到 `SQL result:`。
+- LLM 输出无法解析、缺少 evidence 或出现未出现在 SQL result 中的数值时为什么要回退。
+- 为什么“系统执行 SQL，LLM 分析结果”比“LLM 执行 SQL 并分析”更安全。
+
 ## 必做实验
 
 你要自己跑一遍 demo，并故意制造错误。这样面试时讲起来才有底气。
@@ -244,6 +260,8 @@ SELECT COUNT(*) AS cnt FROM employees
 
 - 为什么 `COUNT(*)` 比 `SELECT *` 更符合“数量是多少”。
 - `candidates` 中会包含 SQL、status、score、evidence、execution.row_count、execution.columns。
+- `result` 中会包含 `columns=["cnt"]`、`rows=[{"cnt": 1}]`。
+- `analysis.key_findings` 中必须有类似 `SQL result: cnt = 1` 的证据。
 
 ### 实验 2：非法表名
 
@@ -286,12 +304,40 @@ DROP TABLE employees
 
 > SQL 执行层有危险命令过滤，工具层还有 schema 白名单，形成两层防护。后续生产化还可以接权限系统和 SQL AST 级审计。
 
+### 实验 4：LLM 分析器编造数字
+
+模拟 LLM 返回：
+
+```json
+{
+  "answer": "当前员工总数为 999 人。",
+  "key_findings": [
+    {"claim": "cnt = 4", "evidence": "SQL result: cnt = 4"}
+  ]
+}
+```
+
+预期：
+
+- 系统不会接受这个回答。
+- 因为 `999` 没有出现在 SQL result 中。
+- `LLMResultAnalyzer` 会回退到启发式答案：`当前查询结果为 4。`
+
+可以回答的问题：
+
+> 如果 LLM 解释 SQL 结果时又幻觉了怎么办？
+
+回答：
+
+> 我把 LLM 限制成表达层，不让它执行 SQL，也不让它拿数据库连接。它只能消费系统执行后的 SQL result。分析器会校验每个 key finding 的 evidence，还会检查回答、摘要、结论里的数字是否出现在 SQL result 中；如果不满足，就回退到启发式分析。
+
 ## 重点测试文件
 
 测试就是项目说明书。重点看：
 
 - `tests/test_api_e2e.py`：API 端到端。
 - `tests/test_candidate_ranking.py`：候选 SQL 排序。
+- `tests/test_result_analysis.py`：结果分析、grounded evidence 和 LLM 回退。
 - `tests/test_schema_scanner_samples.py`：schema 语义增强。
 - `tests/test_agent_tools.py`：工具层和白名单。
 - `tests/test_conversation.py`：多轮会话。
@@ -299,7 +345,7 @@ DROP TABLE employees
 当前测试结果要记住：
 
 ```text
-84 passed, 3 skipped, 2 warnings
+90 passed, 3 skipped, 2 warnings
 ```
 
 面试时可以说：
@@ -342,12 +388,14 @@ pytest tests/test_api_e2e.py -q
 1. 读 `sql_agent/sql/scanner.py`。
 2. 读 `sql_agent/agent/tools.py`。
 3. 读 `sql_agent/ranking/ranker.py`。
-4. 跑：
+4. 读 `sql_agent/analysis/result_analyzer.py`。
+5. 跑：
 
 ```powershell
 pytest tests/test_schema_scanner_samples.py -q
 pytest tests/test_agent_tools.py -q
 pytest tests/test_candidate_ranking.py -q
+pytest tests/test_result_analysis.py -q
 ```
 
 当天必须能回答：
@@ -355,6 +403,7 @@ pytest tests/test_candidate_ranking.py -q
 - 怎么降低 LLM 幻觉？
 - 怎么保证 SQL 安全？
 - 为什么候选排序比直接返回 SQL 更好？
+- 为什么最终答案必须基于 SQL result，而不是让 LLM 自由发挥？
 
 ### 第三天：准备面试话术和拷问
 
@@ -386,11 +435,11 @@ python -m compileall -q sql_agent tests main.py
 
 > 我在实习期间参与了一个企业数据库问答方向的 Data Agent 原型项目。背景是业务人员经常需要临时查数，但不会写 SQL，数据分析师响应成本比较高，所以我们希望做一个自然语言到 SQL 的 Agent。
 >
-> 我的主要工作是核心 NL-to-SQL 链路。我没有直接调用 LLM 生成 SQL，而是把系统拆成几层：首先通过 SQLAlchemy 扫描数据库 schema，包括表、列、主外键、样本值、distinct/null 统计和列语义类型；然后 Agent 根据问题复杂度选择 ReAct 或 Plan-and-Solve，通过受控工具获取相关表结构、检查列值、执行 SQL；生成 SQL 后再用执行反馈做 DAIL 风格自纠错。
+> 我的主要工作是核心 NL-to-SQL / NL-to-data-answer 链路。我没有直接调用 LLM 生成 SQL，而是把系统拆成几层：首先通过 SQLAlchemy 扫描数据库 schema，包括表、列、主外键、样本值、distinct/null 统计和列语义类型；然后 Agent 根据问题复杂度选择 ReAct 或 Plan-and-Solve，通过受控工具获取相关表结构、检查列值、执行 SQL；生成 SQL 后再用执行反馈做 DAIL 风格自纠错。
 >
-> 后面我进一步加了候选 SQL 证据化排序。系统不会盲信 LLM 第一条输出，而是收集候选 SQL，做 schema 白名单校验、危险 SQL 拦截、真实执行，并根据执行结果、问题意图和评估分排序。API 返回最终 SQL 的同时，也返回 candidates，里面有每个候选的分数和执行证据。
+> 后面我进一步加了候选 SQL 证据化排序和 grounded 结果分析。系统不会盲信 LLM 第一条输出，而是收集候选 SQL，做 schema 白名单校验、危险 SQL 拦截、真实执行，并根据执行结果、问题意图和评估分排序。API 返回最终 SQL 的同时，也返回 result、analysis 和 candidates。最终自然语言答案只基于系统执行 SQL 得到的结果，关键发现必须带 `SQL result:` evidence。
 >
-> 这个项目最后用 FastAPI 提供接口，用 SQLite + MockLLM 做了端到端测试，核心模块测试是 84 passed。它目前还是 PoC，但已经验证了一个企业级 NL-to-SQL Agent 的核心闭环：环境感知、工具调用、多轮记忆、执行反馈和可解释决策。
+> 这个项目最后用 FastAPI 提供接口，用 SQLite + MockLLM 做了端到端测试，核心模块测试是 90 passed。它目前还是 PoC，但已经验证了一个企业级 NL-to-SQL Agent 的核心闭环：环境感知、工具调用、多轮记忆、执行反馈、可解释决策和可追溯回答。
 
 ## 项目最难点回答模板
 
@@ -402,7 +451,7 @@ python -m compileall -q sql_agent tests main.py
 
 可以这样回答：
 
-> 最难的不是生成 SQL，而是如何让生成过程可控、可验证。LLM 很容易幻觉表名、列名，或者生成语法正确但语义不对的 SQL。所以我做了三件事：第一，用 SchemaScanner 把数据库结构和列级语义结构化；第二，让 Agent 只能通过工具访问数据库，并做 schema 白名单；第三，引入 CandidateRanker，不直接相信第一条 SQL，而是基于执行证据排序。这样系统从 prompt demo 变成了一个有安全边界和决策证据的 Agent。
+> 最难的不是生成 SQL，而是如何让生成和回答过程都可控、可验证。LLM 很容易幻觉表名、列名，或者生成语法正确但语义不对的 SQL；即使 SQL 执行成功，LLM 在解释结果时也可能编造数字。所以我做了四件事：第一，用 SchemaScanner 把数据库结构和列级语义结构化；第二，让 Agent 只能通过工具访问数据库，并做 schema 白名单；第三，引入 CandidateRanker，不直接相信第一条 SQL，而是基于执行证据排序；第四，引入 ResultAnalyzer，让最终答案只能基于 SQL result，LLM 输出不 grounded 时自动回退。这样系统从 prompt demo 变成了一个有安全边界、决策证据和答案证据的 Agent。
 
 ## 你负责了哪些模块
 
@@ -420,11 +469,12 @@ python -m compileall -q sql_agent tests main.py
 > 4. ConversationManager 多轮上下文接入。
 > 5. DAIL/DIN 风格 SQL 自纠错。
 > 6. CandidateRanker 候选 SQL 执行验证和证据化排序。
-> 7. FastAPI `/api/v1/question` 端到端接口和 SQLite + MockLLM 测试。
+> 7. ResultAnalyzer 基于 SQL result 的稳定回答和 LLM grounded 回退。
+> 8. FastAPI `/api/v1/question` 端到端接口和 SQLite + MockLLM 测试。
 
 如果担心“说太多像一个人做完整项目”，可以改成：
 
-> 我主要负责核心 NL-to-SQL Agent 链路中的 Schema 理解、工具调用安全、SQL 自纠错和候选排序部分，其他存储和 API 框架参考已有工程结构做了适配。
+> 我主要负责核心 NL-to-SQL Agent 链路中的 Schema 理解、工具调用安全、SQL 自纠错、候选排序和结果分析部分，其他存储和 API 框架参考已有工程结构做了适配。
 
 ## 核心拷问问题与回答
 
@@ -462,9 +512,15 @@ python -m compileall -q sql_agent tests main.py
 
 回答：
 
-> 普通 NL-to-SQL 往往直接返回 LLM 第一条 SQL，但 LLM 可能格式对、语义错。我加入 CandidateRanker，把候选 SQL 逐个做 schema 校验、危险命令拦截、真实执行、证据收集，然后基于执行结果、问题意图和 Evaluator 分数排序。API 会返回 `candidates`，所以系统选择过程是透明的。
+> 普通 NL-to-SQL 往往直接返回 LLM 第一条 SQL，但 LLM 可能格式对、语义错。我加入 CandidateRanker，把候选 SQL 逐个做 schema 校验、危险命令拦截、真实执行、证据收集，然后基于执行结果、问题意图和 Evaluator 分数排序。API 会返回 `candidates`，所以系统选择过程是透明的；同时最优候选的执行结果会进入 `result`，成为最终 `answer` 和 `analysis` 的证据源。
 
-### 7. 怎么保证安全？
+### 7. 为什么不只返回 SQL？
+
+回答：
+
+> 从第一性原理看，业务用户要的是问题答案，不是 SQL 字符串。只返回 SQL 对开发者有用，但对业务用户还不够完整，所以我把最优候选 SQL 的执行结果透出到 API，再由 ResultAnalyzer 生成 answer、summary 和 key findings。这里有一个关键边界：SQL 一定由系统执行，LLM 只能基于受控结果做表达；如果 LLM 分析结果时缺少 evidence 或编造 SQL result 中不存在的数字，就回退到启发式分析。
+
+### 8. 怎么保证安全？
 
 回答：
 
@@ -478,9 +534,11 @@ python -m compileall -q sql_agent tests main.py
 >
 > 第四，CandidateRanker 执行候选前再次校验表名。
 >
+> 第五，LLMResultAnalyzer 只消费 SQL result，不接触数据库连接；输出必须带 evidence，不可信时回退到启发式分析。
+>
 > 生产环境还可以继续加只读数据库账号、SQL AST 审计、行列级权限控制和查询超时。
 
-### 8. 这个项目有哪些不足？
+### 9. 这个项目有哪些不足？
 
 回答：
 
@@ -488,35 +546,36 @@ python -m compileall -q sql_agent tests main.py
 >
 > 1. 复杂 SQL 的 alias、CTE、子查询列级白名单还比较保守。
 > 2. 候选 SQL 目前主要来自主输出和中间步骤，还没做多策略主动生成。
-> 3. 真实 OpenAI、MongoDB、ChromaDB 集成测试需要凭据环境才能跑。
-> 4. 还没有接 Langfuse 这类 Agent trace 系统。
-> 5. 权限控制还停留在 schema 白名单和危险命令拦截，生产化还需要更细粒度审计。
+> 3. LLM 结果分析当前主要校验 evidence 和数值可追溯性，复杂因果解释还需要更严格的结论类型约束。
+> 4. 真实 OpenAI、MongoDB、ChromaDB 集成测试需要凭据环境才能跑。
+> 5. 还没有接 Langfuse 这类 Agent trace 系统。
+> 6. 权限控制还停留在 schema 白名单和危险命令拦截，生产化还需要更细粒度审计。
 
-### 9. `sql_metadata` 不存在怎么办？
+### 10. `sql_metadata` 不存在怎么办？
 
 回答：
 
 > 工具层和 ranker 都有 fallback，用正则解析 FROM/JOIN 表名。这个 fallback 主要保证简单 SQL 不被可选依赖阻断。复杂 SQL 有 alias、CTE、子查询和函数表达式，后续生产化应该引入 SQL AST parser。
 
-### 10. 为什么不用正则直接解析所有 SQL？
+### 11. 为什么不用正则直接解析所有 SQL？
 
 回答：
 
 > 简单 fallback 可以，但复杂 SQL 有 alias、CTE、子查询、函数表达式，正则不可靠。生产化应该用 SQL AST，把表、alias、列引用、子查询作用域都解析出来。
 
-### 11. 为什么 CandidateRanker 里 `COUNT` 会加分？
+### 12. 为什么 CandidateRanker 里 `COUNT` 会加分？
 
 回答：
 
 > 这是问题意图启发式。如果问题出现“多少、数量、count、how many”，聚合计数更符合语义。它不是唯一依据，还要结合执行成功、schema 校验和 Evaluator 分数。
 
-### 12. 如果 SQL 执行成功但语义错怎么办？
+### 13. 如果 SQL 执行成功但语义错怎么办？
 
 回答：
 
-> 执行成功只能证明语法和数据访问没问题，不能完全证明语义正确。所以还需要问题意图评分、LLM Evaluator、few-shot、执行结果解释，以及后续更强的测试集评估。
+> 执行成功只能证明语法和数据访问没问题，不能完全证明语义正确。所以还需要问题意图评分、LLM Evaluator、few-shot、执行结果解释，以及后续更强的测试集评估。当前 ResultAnalyzer 解决的是“基于已选 SQL 的结果不要被解释歪”，不是替代 SQL 语义正确性评估。
 
-### 13. 怎么评估 NL-to-SQL 准确率？
+### 14. 怎么评估 NL-to-SQL 准确率？
 
 回答：
 
@@ -529,13 +588,13 @@ python -m compileall -q sql_agent tests main.py
 > - latency 和 token cost。
 > - 安全拦截率和误杀率。
 
-### 14. 为什么要 IoC？
+### 15. 为什么要 IoC？
 
 回答：
 
 > IoC 方便替换 OpenAI、Azure、本地模型，也方便替换 MongoDB/内存存储、Chroma/其他向量库。业务代码依赖接口而不是具体 SDK，测试时可以用 MockLLM 和 MemoryStorage 稳定复现。
 
-### 15. 这个项目上线需要做什么？
+### 16. 这个项目上线需要做什么？
 
 回答：
 
@@ -555,21 +614,36 @@ python -m compileall -q sql_agent tests main.py
 
 可以直接放简历：
 
-> 基于 Dataherald 架构重构 NL-to-SQL Agent 原型，实现原生 ReAct 和 Plan-and-Solve 双 Agent 路由、Schema Scanner/Linking、多轮会话记忆、DIN/DAIL 风格执行反馈自纠错，并进一步加入多候选 SQL 生成与执行证据排序机制。系统通过 IoC 支持 LLM、存储、向量库和评估器替换，提供 FastAPI 接口，使用 SQLite + MockLLM 完成端到端测试，核心模块测试 84 passed。
+> 基于 Dataherald 架构重构 NL-to-SQL / NL-to-data-answer Agent 原型，实现原生 ReAct 和 Plan-and-Solve 双 Agent 路由、Schema Scanner/Linking、多轮会话记忆、DIN/DAIL 风格执行反馈自纠错，并进一步加入多候选 SQL 执行验证、证据化排序和 grounded 结果分析机制。系统通过 IoC 支持 LLM、存储、向量库和评估器替换，提供 FastAPI 接口，使用 SQLite + MockLLM 完成端到端测试，核心模块测试 90 passed。
 
 如果要贴近实习经历：
 
-> 在神州数码实习期间，参与企业数据库问答 Data Agent 原型建设，负责核心 NL-to-SQL 链路中的 Schema 理解、Agent 工具调用、安全校验、SQL 自纠错和候选 SQL 证据化排序。通过 SQLAlchemy 扫描数据库结构与列级语义，结合 ReAct/Plan-and-Solve Agent 生成 SQL，并基于执行反馈和候选排序提升结果可靠性。
+> 在神州数码实习期间，参与企业数据库问答 Data Agent 原型建设，负责核心 NL-to-SQL / NL-to-data-answer 链路中的 Schema 理解、Agent 工具调用、安全校验、SQL 自纠错、候选 SQL 证据化排序和结果 grounded 分析。通过 SQLAlchemy 扫描数据库结构与列级语义，结合 ReAct/Plan-and-Solve Agent 生成 SQL，并基于执行反馈、候选排序和 SQL result evidence 提升结果可靠性。
 
 ## 面试时主动展示什么
 
-重点展示 `/api/v1/question` 返回中的 `candidates` 字段：
+重点展示 `/api/v1/question` 返回中的 `answer`、`result`、`analysis` 和 `candidates` 字段：
 
 ```json
 {
+  "answer": "当前查询结果为 1。",
   "sql": "SELECT COUNT(*) AS cnt FROM employees",
   "status": "VALID",
   "confidence_score": 0.85,
+  "result": {
+    "columns": ["cnt"],
+    "rows": [{"cnt": 1}],
+    "row_count": 1,
+    "truncated": false
+  },
+  "analysis": {
+    "summary": "SQL 返回 1 行 1 列，核心指标 `cnt` 的值为 1。",
+    "key_findings": [
+      {"claim": "cnt = 1", "evidence": "SQL result: cnt = 1"}
+    ],
+    "limitations": ["该结论仅基于当前数据库快照。"],
+    "followup_questions": ["是否需要按类别或部门进一步拆分？"]
+  },
   "candidates": [
     {
       "sql": "SELECT COUNT(*) AS cnt FROM employees",
@@ -586,6 +660,7 @@ python -m compileall -q sql_agent tests main.py
 - Agent 不是黑盒。
 - SQL 选择有执行证据。
 - 系统能解释为什么选这条 SQL。
+- 最终答案绑定到 SQL result evidence，不是 LLM 自由发挥。
 
 ## 最后要记住
 
@@ -593,10 +668,10 @@ python -m compileall -q sql_agent tests main.py
 
 - 你知道 LLM 会幻觉。
 - 你知道企业数据库查询需要安全边界。
-- 你知道 NL-to-SQL 不能只看语法，要看执行结果和语义。
+- 你知道 NL-to-SQL 不能只看语法，要看执行结果、语义和最终答案是否 grounded。
 - 你知道如何用测试保证核心链路稳定。
 - 你能承认原型边界，并给出生产化演进方案。
 
 核心收束句：
 
-> 我做的不是一个 prompt demo，而是围绕 NL-to-SQL 的不确定性，设计了一套 schema 感知、工具约束、执行反馈、自纠错和候选证据排序的工程闭环。
+> 我做的不是一个 prompt demo，而是围绕 NL-to-SQL 的不确定性，设计了一套 schema 感知、工具约束、执行反馈、自纠错、候选证据排序和 grounded 结果分析的工程闭环。

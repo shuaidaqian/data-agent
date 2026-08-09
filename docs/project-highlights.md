@@ -2,7 +2,7 @@
 
 ## 一句话定位
 
-这是一个参考 Dataherald 架构并结合 Data Agent 思路重构的轻量级 NL-to-SQL Agent 系统。它不是简单让 LLM 一次性生成 SQL，而是把数据库环境感知、工具调用、Schema Linking、多轮记忆、执行反馈自纠错和候选 SQL 证据化排序串成一个可测试的工程闭环。
+这是一个参考 Dataherald 架构并结合 Data Agent 思路重构的轻量级 NL-to-SQL / NL-to-data-answer Agent 系统。它不是简单让 LLM 一次性生成 SQL，而是把数据库环境感知、工具调用、Schema Linking、多轮记忆、执行反馈自纠错、候选 SQL 证据化排序和 grounded 结果分析串成一个可测试的工程闭环。
 
 ## 面试官容易眼前一亮的亮点
 
@@ -112,12 +112,29 @@
 - 收集 row count、columns、preview、error。
 - 综合 schema、执行结果、问题意图和 Evaluator 分数排序。
 - API 返回 `candidates`，让系统选择过程透明可解释。
+- 向 API 透出最优候选 SQL 的执行结果，作为最终答案的证据来源。
 
 面试表达：
 
-> 系统不会盲信第一条 SQL，而是对候选 SQL 做执行验证和证据化排序。最终返回的不只是 SQL，还有候选分数、执行行数、结果列和选择依据。
+> 系统不会盲信第一条 SQL，而是对候选 SQL 做执行验证和证据化排序。最终返回的不只是 SQL，还有候选分数、执行行数、结果列和选择依据，后续自然语言答案也只基于这份受控执行结果生成。
 
-### 8. 可替换 IoC 架构
+### 8. Grounded 结果分析，不止返回 SQL
+
+这是把项目从“SQL 生成器”推进到“数据问答 Agent”的关键增强。
+
+当前能力：
+
+- `/api/v1/question` 透出最优候选 SQL 的真实执行结果，包括 `columns`、`rows`、`row_count` 和 `truncated`。
+- 默认启用 `HeuristicResultAnalyzer`，从 SQL result 生成稳定的 `answer`、`summary`、`key_findings`、`limitations` 和 `followup_questions`。
+- 可选启用 `LLMResultAnalyzer`，让自然语言回答更流畅，但 LLM 只接收受控 SQL result，不接收数据库连接，也不执行 SQL。
+- 每个关键发现必须包含 `SQL result:` evidence。
+- 如果 LLM 输出无法解析、缺少 evidence，或回答、摘要、结论中包含 SQL result 中不存在的数值，系统会自动回退到启发式分析。
+
+面试表达：
+
+> 第一性原理上，用户真正要的是数据答案，不是 SQL 字符串。所以我让系统执行最优候选 SQL，把结果作为可信证据返回；自然语言分析只允许基于这份结果生成，LLM 的作用是表达，不是取数。这样既让回答更饱满，也保留了 SQL 和 evidence 作为审计依据。
+
+### 9. 可替换 IoC 架构
 
 项目通过 `System` 和环境变量注册实现类。
 
@@ -133,7 +150,7 @@
 
 > 我把 LLM、存储、向量库、上下文检索和评估器都抽象成可替换组件，业务代码依赖接口而不是具体 SDK，方便后续切 OpenAI、Azure、本地模型或不同向量库。
 
-### 9. 测试覆盖不是摆设
+### 10. 测试覆盖不是摆设
 
 当前根目录重构版测试覆盖：
 
@@ -146,6 +163,7 @@
 - API 端到端。
 - IoC 注册。
 - 候选 SQL Ranking。
+- ResultAnalyzer grounded 输出和 LLM 回退保护。
 - 自纠错。
 - Evaluator。
 - 真实 OpenAI/MongoDB/ChromaDB 集成测试骨架。
@@ -153,7 +171,7 @@
 最新验证结果：
 
 ```text
-84 passed, 3 skipped, 2 warnings
+90 passed, 3 skipped, 2 warnings
 ```
 
 面试表达：
@@ -177,21 +195,37 @@
    - 多候选 SQL。
    - 执行证据排序。
    - API 候选透明返回。
-5. 最终系统从“LLM 生成 SQL”升级为“Agent 感知数据库、调用工具、基于执行证据决策”。
+   - grounded 结果分析。
+5. 最终系统从“LLM 生成 SQL”升级为“Agent 感知数据库、调用工具、基于执行证据决策，并输出可追溯数据答案”。
 
 ## 可以直接放进简历的描述
 
-> 基于 Dataherald 架构重构 NL-to-SQL Agent 原型，实现原生 ReAct 和 Plan-and-Solve 双 Agent 路由、Schema Scanner/Linking、多轮会话记忆、DIN/DAIL 风格执行反馈自纠错，并进一步加入多候选 SQL 生成与执行证据排序机制。系统通过 IoC 支持 LLM、存储、向量库和评估器替换，提供 FastAPI 接口，使用 SQLite + MockLLM 完成端到端测试，核心模块测试 84 passed。
+> 基于 Dataherald 架构重构 NL-to-SQL / NL-to-data-answer Agent 原型，实现原生 ReAct 和 Plan-and-Solve 双 Agent 路由、Schema Scanner/Linking、多轮会话记忆、DIN/DAIL 风格执行反馈自纠错，并进一步加入多候选 SQL 执行验证、证据化排序和 grounded 结果分析机制。系统通过 IoC 支持 LLM、存储、向量库和评估器替换，提供 FastAPI 接口，使用 SQLite + MockLLM 完成端到端测试，核心模块测试 90 passed。
 
 ## 面试时可以主动展示的接口返回
 
-重点展示 `/api/v1/question` 返回中的 `candidates` 字段：
+重点展示 `/api/v1/question` 返回中的 `answer`、`result`、`analysis` 和 `candidates` 字段：
 
 ```json
 {
+  "answer": "当前查询结果为 1。",
   "sql": "SELECT COUNT(*) AS cnt FROM employees",
   "status": "VALID",
   "confidence_score": 0.85,
+  "result": {
+    "columns": ["cnt"],
+    "rows": [{"cnt": 1}],
+    "row_count": 1,
+    "truncated": false
+  },
+  "analysis": {
+    "summary": "SQL 返回 1 行 1 列，核心指标 `cnt` 的值为 1。",
+    "key_findings": [
+      {"claim": "cnt = 1", "evidence": "SQL result: cnt = 1"}
+    ],
+    "limitations": ["该结论仅基于当前数据库快照。"],
+    "followup_questions": ["是否需要按类别或部门进一步拆分？"]
+  },
   "candidates": [
     {
       "sql": "SELECT COUNT(*) AS cnt FROM employees",
@@ -208,6 +242,7 @@
 - Agent 不是黑盒。
 - SQL 选择有执行证据。
 - 系统能解释为什么选这条 SQL。
+- 最终答案不是模型凭空生成，而是绑定到 SQL result evidence。
 
 ## 后续继续增强的高价值方向
 
@@ -227,10 +262,10 @@
    - 将列语义、样本值、业务同义词写入向量库。
    - 支持中文业务词和英文表字段之间的语义召回。
 
-4. Analysis Agent
-   - SQL 执行后生成自然语言洞察。
-   - 自动推荐图表类型。
+4. 结果洞察增强
+   - 基于 SQL 执行结果推荐图表类型。
    - 返回 ECharts/Vega-Lite spec。
+   - 对多行结果生成 Top-K、异常值、分布变化等可追溯发现。
 
 5. Agent Trace
    - 接入 Langfuse 或 LangSmith。
