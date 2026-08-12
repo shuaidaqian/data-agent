@@ -1,0 +1,23 @@
+version: 1
+db_connection_id: demo
+metrics:
+  - name: employee_count
+    label: 员工数量
+    table: employees
+    expression: COUNT(*)
+    synonyms:
+      - 员工数
+      - 人数
+      - employee count
+    default_filters:
+      - field: status
+        op: "="
+        value: active
+dimensions:
+  - name: department
+    label: 部门
+    table: employees
+    column: department
+    synonyms:
+      - 团队
+      - 部门名称

@@ -40,11 +40,11 @@
 
 这个项目可以定位为：
 
-> 一个参考 Dataherald 架构并结合 Data Agent 思路重构的轻量级 NL-to-SQL / NL-to-data-answer Agent 系统。它不是简单让 LLM 一次性生成 SQL，而是把数据库环境感知、工具调用、Schema Linking、多轮记忆、执行反馈自纠错、候选 SQL 证据化排序和 grounded 结果分析串成一个可测试的工程闭环。
+> 一个参考 Dataherald 架构并结合 Data Agent 思路重构的轻量级企业数据问答 Agent 系统。它不是简单让 LLM 一次性生成 SQL，而是把 Semantic Layer、SemanticQueryPlan、数据库环境感知、工具调用、Schema Linking、多轮记忆、执行反馈自纠错、候选 SQL 证据化排序、grounded 结果分析、反馈学习和离线评估串成一个可测试的工程闭环。
 
 更面试化的版本：
 
-> 这个项目的亮点不是“我调了一个大模型生成 SQL”，而是“我围绕 LLM 不可靠这个事实，设计了 schema 感知、工具约束、执行反馈、自纠错、候选证据排序和结果 grounded 分析这一整套工程闭环”。
+> 这个项目的亮点不是“我调了一个大模型生成 SQL”，而是“我围绕业务语义不清和 LLM 不可靠这两个核心问题，设计了 Semantic Layer、SemanticQueryPlan、工具约束、执行反馈、候选证据排序、grounded 结果分析和反馈评估闭环”。
 
 ## 必须背熟的主链路
 
@@ -57,12 +57,16 @@
 -> 从存储加载 DatabaseConnection
 -> SQLAlchemy 连接数据库
 -> SchemaScanner 扫描表、列、样本值、语义类型
+-> SemanticModelRegistry 加载指标、维度、同义词和默认过滤条件
+-> SemanticPlanner 生成 SemanticQueryPlan
 -> ContextStore 检索 few-shot 和管理员指令
+-> FeedbackService 召回 verified query
 -> AgentSelector 选择 ReAct 或 PlanSolve
 -> AgentToolkit 调用工具观察数据库
 -> LLM 生成 SQL
 -> DAIL/DIN 自纠错
 -> CandidateRanker 执行验证和排序
+-> VisualizationRecommender 生成图表建议
 -> ResultAnalyzer 基于最优候选执行结果生成 answer/summary/key_findings
 -> API 返回最终 answer + SQL + result + analysis + candidates 证据
 ```
@@ -71,7 +75,7 @@
 
 你要能在 2 分钟内讲清楚：
 
-> 这个项目是为了解决企业内部业务人员不会写 SQL，但又需要查数和理解结果的问题。传统方案要么依赖数据分析师手写 SQL，要么 BI 报表不够灵活。我们做的是一个轻量级 NL-to-SQL / NL-to-data-answer Data Agent：用户输入自然语言问题，系统先扫描数据库 Schema，构造表、列、主外键、样本值和列语义信息，然后 Agent 通过受控工具获取相关表结构、执行 SQL、拿到反馈，再生成或修正 SQL。为了避免盲信 LLM 的第一次输出，我加入了候选 SQL 执行验证和证据化排序，让系统根据 schema 校验、执行结果和问题意图选择最优 SQL。最后，系统会把最优候选的执行结果透出给 API，并基于这份受控结果生成 answer、summary 和 key findings，所以用户拿到的是可追溯的数据答案，而不只是 SQL 字符串。
+> 这个项目是为了解决企业内部业务人员不会写 SQL，但又需要查数和理解结果的问题。传统方案要么依赖数据分析师手写 SQL，要么 BI 报表不够灵活。我们做的是一个轻量级企业数据问答 Agent：用户输入自然语言问题后，系统先通过 Semantic Layer 命中业务指标、维度、同义词和默认过滤条件，生成可解释的 SemanticQueryPlan，再编译成 SQL 候选；同时系统会结合 verified query 和 Agent 生成的 SQL，统一做执行验证和候选排序。最后，系统把最优候选的执行结果透出给 API，基于 SQL result evidence 生成答案和图表建议。用户反馈如果包含修正 SQL，还会沉淀成 verified query，后续类似问题可以复用。
 
 ## 推荐阅读顺序
 
@@ -336,8 +340,12 @@ DROP TABLE employees
 测试就是项目说明书。重点看：
 
 - `tests/test_api_e2e.py`：API 端到端。
+- `tests/test_semantic_layer.py`：Semantic Layer 和 SemanticQueryPlan。
 - `tests/test_candidate_ranking.py`：候选 SQL 排序。
 - `tests/test_result_analysis.py`：结果分析、grounded evidence 和 LLM 回退。
+- `tests/test_feedback.py`：反馈保存和 verified query 沉淀。
+- `tests/test_eval_harness.py`：离线评估指标。
+- `tests/test_visualization.py`：图表推荐和 visualization spec。
 - `tests/test_schema_scanner_samples.py`：schema 语义增强。
 - `tests/test_agent_tools.py`：工具层和白名单。
 - `tests/test_conversation.py`：多轮会话。
@@ -345,7 +353,7 @@ DROP TABLE employees
 当前测试结果要记住：
 
 ```text
-90 passed, 3 skipped, 2 warnings
+104 passed, 3 skipped, 2 warnings
 ```
 
 面试时可以说：
@@ -439,7 +447,7 @@ python -m compileall -q sql_agent tests main.py
 >
 > 后面我进一步加了候选 SQL 证据化排序和 grounded 结果分析。系统不会盲信 LLM 第一条输出，而是收集候选 SQL，做 schema 白名单校验、危险 SQL 拦截、真实执行，并根据执行结果、问题意图和评估分排序。API 返回最终 SQL 的同时，也返回 result、analysis 和 candidates。最终自然语言答案只基于系统执行 SQL 得到的结果，关键发现必须带 `SQL result:` evidence。
 >
-> 这个项目最后用 FastAPI 提供接口，用 SQLite + MockLLM 做了端到端测试，核心模块测试是 90 passed。它目前还是 PoC，但已经验证了一个企业级 NL-to-SQL Agent 的核心闭环：环境感知、工具调用、多轮记忆、执行反馈、可解释决策和可追溯回答。
+> 这个项目最后用 FastAPI 提供接口，用 SQLite + MockLLM 做了端到端测试，核心模块测试是 104 passed。它目前还是 PoC，但已经验证了一个企业级数据问答 Agent 的核心闭环：业务语义建模、环境感知、工具调用、多轮记忆、执行反馈、可解释决策、可追溯回答和反馈评估。
 
 ## 项目最难点回答模板
 
@@ -614,15 +622,15 @@ python -m compileall -q sql_agent tests main.py
 
 可以直接放简历：
 
-> 基于 Dataherald 架构重构 NL-to-SQL / NL-to-data-answer Agent 原型，实现原生 ReAct 和 Plan-and-Solve 双 Agent 路由、Schema Scanner/Linking、多轮会话记忆、DIN/DAIL 风格执行反馈自纠错，并进一步加入多候选 SQL 执行验证、证据化排序和 grounded 结果分析机制。系统通过 IoC 支持 LLM、存储、向量库和评估器替换，提供 FastAPI 接口，使用 SQLite + MockLLM 完成端到端测试，核心模块测试 90 passed。
+> 基于 Dataherald 架构重构企业数据问答 Agent 原型，实现 Semantic Layer 与 SemanticQueryPlan 中间表示、原生 ReAct / Plan-and-Solve 双 Agent 路由、Schema Scanner/Linking、多轮会话记忆、DIN/DAIL 风格执行反馈自纠错、多候选 SQL 执行验证与证据化排序、grounded 结果分析、Feedback verified query 沉淀和离线 Evaluation Harness。系统提供 FastAPI 接口，使用 SQLite + MockLLM 完成端到端测试，核心模块测试 104 passed。
 
 如果要贴近实习经历：
 
-> 在神州数码实习期间，参与企业数据库问答 Data Agent 原型建设，负责核心 NL-to-SQL / NL-to-data-answer 链路中的 Schema 理解、Agent 工具调用、安全校验、SQL 自纠错、候选 SQL 证据化排序和结果 grounded 分析。通过 SQLAlchemy 扫描数据库结构与列级语义，结合 ReAct/Plan-and-Solve Agent 生成 SQL，并基于执行反馈、候选排序和 SQL result evidence 提升结果可靠性。
+> 在神州数码实习期间，参与企业数据库问答 Data Agent 原型建设，负责核心 NL-to-SQL / NL-to-data-answer 链路中的 Semantic Layer、Schema 理解、Agent 工具调用、安全校验、SQL 自纠错、候选 SQL 证据化排序、结果 grounded 分析和反馈评估闭环。通过 SQLAlchemy 扫描数据库结构与列级语义，结合业务指标语义模型、ReAct/Plan-and-Solve Agent 和 verified query 反馈学习提升结果可靠性。
 
 ## 面试时主动展示什么
 
-重点展示 `/api/v1/question` 返回中的 `answer`、`result`、`analysis` 和 `candidates` 字段：
+重点展示 `/api/v1/question` 返回中的 `answer`、`semantic_plan`、`result`、`analysis`、`visualization` 和 `candidates` 字段：
 
 ```json
 {
@@ -630,6 +638,14 @@ python -m compileall -q sql_agent tests main.py
   "sql": "SELECT COUNT(*) AS cnt FROM employees",
   "status": "VALID",
   "confidence_score": 0.85,
+  "semantic_plan": {
+    "intent": "metric_query",
+    "metrics": ["employee_count"],
+    "dimensions": [],
+    "filters": [],
+    "order_by": [],
+    "limit": null
+  },
   "result": {
     "columns": ["cnt"],
     "rows": [{"cnt": 1}],
@@ -643,6 +659,11 @@ python -m compileall -q sql_agent tests main.py
     ],
     "limitations": ["该结论仅基于当前数据库快照。"],
     "followup_questions": ["是否需要按类别或部门进一步拆分？"]
+  },
+  "visualization": {
+    "chart_type": "metric_card",
+    "title": "员工数量是多少？",
+    "spec": {"value": {"field": "cnt"}, "label": "cnt"}
   },
   "candidates": [
     {
@@ -661,6 +682,7 @@ python -m compileall -q sql_agent tests main.py
 - SQL 选择有执行证据。
 - 系统能解释为什么选这条 SQL。
 - 最终答案绑定到 SQL result evidence，不是 LLM 自由发挥。
+- 查询逻辑可以通过 `semantic_plan` 解释和审查。
 
 ## 最后要记住
 

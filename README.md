@@ -2,7 +2,7 @@
 
 本项目是一个基于 [Dataherald](https://github.com/Dataherald/dataherald) 架构分析后重构的 NL->SQL Agent 原型。项目目标不是简单复刻 Dataherald，而是抽取其核心 Text-to-SQL 链路，并围绕 Agent 控制流、多轮上下文、Schema Linking 和执行反馈自纠错做一版更轻量、更可控的重构实现。
 
-更准确的项目定位是：**基于 Dataherald 架构反思后的轻量级 NL->SQL / NL-to-data-answer Agent 重构与增强实验**。它适合作为学习企业级 NL->SQL 系统架构、Agent 工具调用、数据库 Schema 理解、LLM 自纠错闭环和基于执行结果的可追溯回答生成的工程项目。
+更准确的项目定位是：**基于 Dataherald 架构反思后的轻量级企业数据问答 Agent 重构与增强实验**。它不是裸 schema prompt 的 Text-to-SQL demo，而是围绕 Semantic Layer、SemanticQueryPlan、候选 SQL 执行证据、grounded 结果分析、反馈学习和离线评估闭环构建的可测试工程项目。
 
 ## 项目背景
 
@@ -27,6 +27,8 @@ Dataherald 是一个面向企业数据问答场景的开源 NL->SQL 引擎，原
 | 复杂 SQL | 多表 JOIN、CTE、窗口函数支持有限 | Schema Linking、外键路径发现、复杂查询分解 |
 | Self-Correct | 以语法验证为主 | DIN-SQL 风格语义验证 + DAIL-SQL 风格执行反馈修正 |
 | 结果回答 | 主要返回 SQLGeneration | API 透出最优候选执行结果，并基于受控结果生成 grounded answer/summary/key findings |
+| 业务语义 | 主要依赖数据库 schema 和说明 | Semantic Layer 显式建模指标、维度、同义词和默认过滤条件 |
+| 反馈评估 | 缺少闭环 | 用户反馈沉淀 verified query，Evaluation Harness 衡量 valid/execution/grounding 指标 |
 
 ## 核心架构
 
@@ -90,14 +92,18 @@ ResultAnalyzer
 1. `POST /api/v1/question` 接收自然语言问题。
 2. 系统构造 `Prompt` 和 `Conversation`。
 3. `SchemaScanner` 扫描数据库表、列、主键和外键。
-4. `ContextRetriever` 检索相关 Golden SQL 和管理员指令。
-5. `AgentSelector` 根据问题复杂度选择 ReAct 或 Plan-and-Solve。
-6. Agent 通过 `AgentToolkit` 调用数据库工具进行观察和验证。
-7. LLM 输出 SQL。
-8. `DAILStyleCorrector` 根据执行结果进行迭代修正。
-9. `CandidateRanker` 对候选 SQL 做 schema 校验、执行验证和证据化排序。
-10. API 透出最优候选 SQL 的受控执行结果，包括列名、预览行数、返回行数和截断状态。
-11. `ResultAnalyzer` 基于 SQL 执行结果生成 `answer`、`summary` 和带 evidence 的 `key_findings`，API 返回最终答案、SQL、执行结果、分析证据、中间步骤、候选证据和错误信息。
+4. 当配置 `SEMANTIC_MODEL_PATH` 时，`SemanticPlanner` 会把问题解析成 `SemanticQueryPlan`，并编译出语义 SQL 候选。
+5. `ContextRetriever` 检索相关 Golden SQL 和管理员指令。
+6. `FeedbackService` 召回历史 verified query，和语义 SQL、Agent SQL 一起进入候选集合。
+7. `AgentSelector` 根据问题复杂度选择 ReAct 或 Plan-and-Solve。
+8. Agent 通过 `AgentToolkit` 调用数据库工具进行观察和验证。
+9. LLM 输出补充 SQL。
+10. `DAILStyleCorrector` 根据执行结果进行迭代修正。
+11. `CandidateRanker` 对候选 SQL 做 schema 校验、执行验证和证据化排序。
+12. API 透出最优候选 SQL 的受控执行结果，包括列名、预览行数、返回行数和截断状态。
+13. `ResultAnalyzer` 基于 SQL 执行结果生成 `answer`、`summary` 和带 evidence 的 `key_findings`。
+14. `VisualizationRecommender` 根据结果形状生成 metric card、bar、line 或 table spec。
+15. API 返回最终答案、SemanticQueryPlan、SQL、执行结果、分析证据、图表建议、中间步骤、候选证据和错误信息。
 
 ## 项目结构
 
@@ -111,6 +117,9 @@ sql_agent/
 ├── correction/    # SQL 自纠错模块，包括 DIN-SQL 和 DAIL-SQL 风格修正器
 ├── ranking/       # 候选 SQL 排序、执行证据和评分选择
 ├── analysis/      # 基于 SQL 执行结果的稳定回答与 grounded LLM 分析
+├── semantic/      # Semantic Layer、SemanticQueryPlan、语义 SQL 编译
+├── feedback/      # 用户反馈、verified query 和反馈学习闭环
+├── visualization/ # 基于 SQL result 的图表推荐和可视化 spec
 ├── storage/       # 存储层，包括 MongoDB 文档存储和 ChromaDB 向量存储
 ├── eval/          # SQL 质量评估器
 └── api/           # FastAPI REST 路由
@@ -306,7 +315,7 @@ services/          # Dataherald 原始多服务参考实现或源码镜像
 
 当前能力包括：
 
-- 从 Agent 主输出和中间步骤中收集候选 SQL。
+- 从 Semantic Layer、verified query、Agent 主输出和中间步骤中收集候选 SQL。
 - 对候选 SQL 做规范化去重。
 - 执行危险 SQL 拦截和 schema 白名单校验。
 - 执行候选 SQL，收集行数、列名、结果预览和错误。
@@ -318,6 +327,41 @@ services/          # Dataherald 原始多服务参考实现或源码镜像
 
 结果分析遵循一个硬约束：**系统执行 SQL，LLM 只分析受控 SQL 执行结果**。默认 `RESULT_ANALYZER=heuristic`，使用启发式分析器生成稳定答案；当设置 `RESULT_ANALYZER=llm` 时，会启用 `LLMResultAnalyzer` 让回答更自然，但它必须返回 JSON，且每个关键发现必须包含可追溯到 SQL result 的 evidence。如果 LLM 输出无法解析、缺少 evidence，或回答/摘要/结论中出现 SQL result 中不存在的数值，系统会自动回退到启发式分析，避免编造结论。
 
+### 11. Semantic Layer 与 SemanticQueryPlan
+
+`sql_agent/semantic/` 将业务语义从裸 schema 中抽出来，显式建模：
+
+- 指标：如 `employee_count`。
+- 维度：如 `department`。
+- 同义词：如“员工数”、“人数”。
+- 默认过滤条件：如只统计 `status = active`。
+- `SemanticQueryPlan`：指标、维度、过滤、排序和 limit 的中间表示。
+
+当配置 `SEMANTIC_MODEL_PATH` 时，API 会优先尝试生成语义计划，并把语义计划编译成 SQL 候选。这样 SQL 不再只是 LLM 的直接输出，而是一个可解释、可校验的编译产物。
+
+### 12. Feedback + Evaluation Loop
+
+`sql_agent/feedback/` 支持用户对 SQL 和答案进行反馈。如果反馈中包含 `corrected_sql`，系统会自动沉淀为 verified query，并在后续相似问题中召回，作为候选 SQL 的高可信来源。
+
+新增 API：
+
+- `POST /api/v1/feedback`
+- `GET /api/v1/feedback`
+- `GET /api/v1/verified-queries`
+
+`sql_agent/eval/harness.py` 提供离线评估框架，支持从 case YAML 中衡量 SQL 可执行率、执行结果准确率、答案 grounded 率、Semantic plan 命中率和 verified query 命中率。
+
+### 13. Visualization Spec
+
+`sql_agent/visualization/` 基于 SQL result 的结构推荐图表：
+
+- 单行单列：`metric_card`
+- 分类字段 + 数值字段：`bar`
+- 时间字段 + 数值字段：`line`
+- 其他明细：`table`
+
+这让 API 返回从“答案 + SQL”进一步扩展为“答案 + 证据 + 可展示洞察”。
+
 ## API 端点
 
 | 方法 | 路径 | 说明 |
@@ -326,6 +370,9 @@ services/          # Dataherald 原始多服务参考实现或源码镜像
 | `POST` | `/api/v1/question` | 自然语言数据问答，返回答案、SQL、执行结果、grounded 分析、候选证据，并支持多轮对话和自纠错 |
 | `POST` | `/api/v1/golden-sqls` | 添加 Golden SQL 示例 |
 | `GET` | `/api/v1/golden-sqls` | 查询 Golden SQL 示例 |
+| `POST` | `/api/v1/feedback` | 提交查询反馈，corrected SQL 会沉淀为 verified query |
+| `GET` | `/api/v1/feedback` | 查询反馈记录 |
+| `GET` | `/api/v1/verified-queries` | 查询沉淀出的 verified query |
 | `POST` | `/api/v1/database-connections` | 添加数据库连接 |
 | `GET` | `/api/v1/database-connections` | 列出数据库连接 |
 | `POST` | `/api/v1/database-connections/{id}/scan` | 扫描数据库 Schema |
@@ -369,6 +416,10 @@ pytest -q tests
 - 候选 SQL 执行验证、证据化评分和排序。
 - 最优候选执行结果 API 透出。
 - 启发式 ResultAnalyzer 和严格 grounded 的 LLMResultAnalyzer。
+- Semantic Layer、SemanticQueryPlan、语义 SQL 编译。
+- FeedbackService、verified query 沉淀和召回。
+- VisualizationRecommender 图表推荐。
+- Evaluation Harness 离线指标评估。
 - Agent 基类、复杂度判断和工具函数。
 - SQL 注入拦截。
 - 工具层 schema 白名单校验。
@@ -380,7 +431,7 @@ pytest -q tests
 当前本地测试结果：
 
 ```text
-90 passed, 3 skipped, 2 warnings
+104 passed, 3 skipped, 2 warnings
 ```
 
 其中 3 个 skipped 是真实 OpenAI、MongoDB、ChromaDB 集成测试，默认需要设置 `RUN_REAL_INTEGRATIONS=true` 才运行。2 个 warnings 分别来自当前 FastAPI TestClient/httpx 组合的弃用提示，以及当前工作区 `.pytest_cache` 写入权限提示。
@@ -403,9 +454,11 @@ pytest -q
 2. `SqlDbQuery` 复杂多表查询目前主要校验表名，列级白名单对 alias、聚合表达式、复杂子查询仍采取保守策略，后续可引入更稳定的 SQL AST 解析。
 3. 候选 SQL 当前主要来自 Agent 主输出和中间步骤，后续可以扩展为多策略主动生成候选。
 4. `LLMResultAnalyzer` 当前主要校验 evidence 和数值事实可追溯性，复杂自然语言因果解释仍应保持在 limitations 中，不能当成数据库外的事实判断。
-5. MongoDB 会话存储目前按普通 dict/datetime 写入，后续如果引入更复杂对象，需要统一序列化策略。
-6. 真实 OpenAI、MongoDB、ChromaDB 集成测试已经补充，但默认跳过，需要在具备凭据和外部服务的环境中通过 `RUN_REAL_INTEGRATIONS=true` 显式执行。
-7. 全仓库测试仍受 `services/engine` 原始 Dataherald 子项目依赖影响，需要单独安装该子项目依赖，或配置 pytest 默认只收集根目录重构版测试。
+5. Semantic planner 当前是启发式匹配，SQL compiler 主要支持单指标、简单维度、默认过滤和 Top-K，不是完整语义 SQL 编译器。
+6. Verified query 召回使用轻量 token overlap，后续可以接 VectorBackend 做语义召回。
+7. MongoDB 会话存储目前按普通 dict/datetime 写入，后续如果引入更复杂对象，需要统一序列化策略。
+8. 真实 OpenAI、MongoDB、ChromaDB 集成测试已经补充，但默认跳过，需要在具备凭据和外部服务的环境中通过 `RUN_REAL_INTEGRATIONS=true` 显式执行。
+9. 全仓库测试仍受 `services/engine` 原始 Dataherald 子项目依赖影响，需要单独安装该子项目依赖，或配置 pytest 默认只收集根目录重构版测试。
 
 这些边界不影响项目作为学习和展示 Agent 架构的价值，但在面试或简历中应如实表述为“原型系统”和“核心链路重构”，不要包装成完整生产级平台。
 
@@ -449,6 +502,12 @@ pytest -q
    - 可选 LLM 分析器只消费 SQL result，不接触数据库连接。
    - 关键发现必须带 SQL result evidence，异常或不可信输出自动回退。
 
+7. **Semantic Layer + Feedback + Evaluation**
+   - 指标、维度、同义词和默认过滤条件通过 YAML 语义模型显式定义。
+   - 用户问题先解析为 `SemanticQueryPlan`，SQL 是可校验计划的编译结果。
+   - 用户反馈可沉淀为 verified query，后续相似问题优先复用。
+   - Evaluation Harness 衡量 valid rate、execution accuracy、answer grounding rate 和 semantic plan accuracy。
+
 更稳妥的项目表述：
 
 > 这是一个基于 Dataherald 架构分析后实现的下一代 NL->SQL Agent 原型，重点验证 Agent 控制流、Schema Linking、多轮上下文和执行反馈自纠错几个关键技术点。
@@ -471,6 +530,8 @@ pytest -q
 8. 阅读 `sql_agent/correction/dail_style.py`，理解执行反馈驱动的 SQL 修正闭环。
 9. 阅读 `sql_agent/ranking/ranker.py`，理解候选 SQL 如何基于执行证据排序。
 10. 阅读 `sql_agent/analysis/result_analyzer.py`，理解系统如何把 SQL result 转成稳定、可追溯的自然语言答案。
+11. 阅读 `sql_agent/semantic/`，理解 Semantic Layer 如何把业务口径变成可校验计划。
+12. 阅读 `sql_agent/feedback/` 和 `sql_agent/eval/harness.py`，理解反馈学习和离线评估闭环。
 
 ## 后续开发计划
 
@@ -489,6 +550,11 @@ pytest -q
 - [x] 将最优候选 SQL 的执行结果透出到 `/api/v1/question`。
 - [x] 增加启发式 `ResultAnalyzer`，生成稳定的 `answer`、`summary` 和 `key_findings`。
 - [x] 接入严格 grounded 的 `LLMResultAnalyzer`，自然语言回答必须基于 SQL result，异常输出自动回退。
+- [x] 增加 Semantic Layer，支持指标、维度、同义词和默认过滤条件。
+- [x] 增加 `SemanticQueryPlan` 中间表示和语义 SQL 编译。
+- [x] 增加 Feedback API，将 corrected SQL 沉淀为 verified query。
+- [x] 增加 Evaluation Harness，衡量 valid/execution/grounding/semantic plan 指标。
+- [x] 增加 VisualizationRecommender，返回 metric card、bar、line、table spec。
 - [x] 为 SchemaScanner 增加列级语义类型、同义词和统计信息。
 - [ ] 扩展多策略候选 SQL 主动生成。
 - [ ] 增加图表推荐和可视化 spec 输出，让结果分析进一步从文本答案扩展到可展示洞察。
@@ -506,4 +572,6 @@ pytest -q
 - **Schema 优先**：先理解数据库结构，再让 LLM 生成 SQL。
 - **执行闭环**：生成 SQL 后通过数据库执行反馈进行修正。
 - **答案可追溯**：最终自然语言答案只能来自系统执行 SQL 得到的受控结果，SQL 和 evidence 保留为审计依据。
+- **业务语义显式化**：指标、维度和默认过滤条件进入 Semantic Layer，SQL 是可校验计划的编译结果。
+- **反馈可沉淀**：用户修正可以进入 verified query，参与后续候选召回和排序。
 - **如实演进**：保持原型边界清晰，优先打通核心链路，再补生产级能力。

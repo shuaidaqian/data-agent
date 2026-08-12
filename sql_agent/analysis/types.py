@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 
 @dataclass
@@ -34,6 +34,7 @@ class AnalysisResult:
     key_findings: List[KeyFinding] = field(default_factory=list)
     limitations: List[str] = field(default_factory=list)
     followup_questions: List[str] = field(default_factory=list)
+    visualization: Optional[Dict[str, Any]] = None
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)

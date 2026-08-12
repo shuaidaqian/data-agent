@@ -48,8 +48,10 @@ class SQLResponse(BaseModel):
     sql: str
     status: str
     confidence_score: Optional[float] = None
+    semantic_plan: Optional[Dict[str, Any]] = None
     result: Optional[Dict[str, Any]] = None
     analysis: Optional[Dict[str, Any]] = None
+    visualization: Optional[Dict[str, Any]] = None
     conversation_id: Optional[str] = None
     intermediate_steps: Optional[List[Dict[str, str]]] = None
     candidates: Optional[List[Dict[str, Any]]] = None
@@ -67,6 +69,17 @@ class GoldenSQLRequest(BaseModel):
     prompt_text: str
     sql: str
     db_connection_id: str
+
+
+class FeedbackRequest(BaseModel):
+    question: str
+    db_connection_id: str
+    sql: str
+    answer_correct: bool
+    sql_correct: bool
+    wrong_reason: Optional[str] = None
+    corrected_sql: Optional[str] = None
+    comment: Optional[str] = None
 
 
 _system: Optional[System] = None
@@ -108,6 +121,31 @@ def create_result_analyzer(system: System, llm: Any):
     if system.settings.result_analyzer == "llm":
         return LLMResultAnalyzer(llm)
     return HeuristicResultAnalyzer()
+
+
+def create_semantic_plan(system: System, question: str):
+    """按配置加载语义模型并生成语义查询计划。"""
+    if not system.settings.semantic_model_path:
+        return None, []
+
+    from pathlib import Path
+
+    from sql_agent.semantic.compiler import SemanticSQLCompiler
+    from sql_agent.semantic.planner import SemanticPlanner
+    from sql_agent.semantic.registry import SemanticModelRegistry
+    from sql_agent.semantic.validator import SemanticPlanValidator
+
+    model_path = Path(system.settings.semantic_model_path)
+    if not model_path.exists():
+        return None, []
+
+    registry = SemanticModelRegistry.from_yaml(model_path)
+    plan = SemanticPlanner(registry).plan(question)
+    validation = SemanticPlanValidator(registry).validate(plan)
+    if not validation.valid or not plan.metrics:
+        return plan, []
+    sql = SemanticSQLCompiler().compile(plan)
+    return plan, [sql] if sql else []
 
 
 # ─── 健康检查 ───────────────────────────────────────────
@@ -176,6 +214,7 @@ async def ask_question(request: QuestionRequest):
 
         # 获取上下文（few-shot 示例 + 管理员指令）
         few_shot, instructions = context_store.retrieve_context_for_question(prompt)
+        semantic_plan, semantic_candidate_sqls = create_semantic_plan(system, request.question)
 
         # 选择并运行 Agent
         agent_config = AgentConfig(
@@ -228,6 +267,17 @@ async def ask_question(request: QuestionRequest):
             from sql_agent.ranking.ranker import CandidateRanker
 
             candidate_sqls = CandidateGenerator.collect(result.sql, candidate_step_texts)
+            candidate_sqls = [*semantic_candidate_sqls, *candidate_sqls]
+            try:
+                from sql_agent.feedback.service import FeedbackService
+
+                verified_matches = FeedbackService(storage).retrieve_verified_queries(
+                    request.question,
+                    request.db_connection_id,
+                )
+                candidate_sqls = [match.sql for match in verified_matches] + candidate_sqls
+            except Exception:
+                logger.debug("Verified query retrieval skipped", exc_info=True)
             ranked_candidates = CandidateRanker(
                 database=database,
                 table_descriptions=table_descriptions,
@@ -261,6 +311,7 @@ async def ask_question(request: QuestionRequest):
             sql=result.sql or "",
             status=result.status,
             confidence_score=confidence_score,
+            semantic_plan=semantic_plan.to_dict() if semantic_plan else None,
             result=analysis.result.__dict__ if analysis else None,
             analysis=(
                 {
@@ -275,6 +326,7 @@ async def ask_question(request: QuestionRequest):
                 if analysis
                 else None
             ),
+            visualization=analysis.visualization if analysis else None,
             conversation_id=conversation.id,
             intermediate_steps=steps,
             candidates=[candidate.to_dict() for candidate in ranked_candidates],
@@ -319,6 +371,54 @@ async def list_golden_sqls(db_connection_id: str = Query(None)):
     if db_connection_id:
         query["db_connection_id"] = db_connection_id
     return storage.find("golden_sqls", query)
+
+
+# ─── 查询反馈 / Verified Query ───────────────────────────
+
+
+@router.post("/feedback")
+async def submit_feedback(request: FeedbackRequest):
+    """提交查询反馈，必要时沉淀为 verified query"""
+    from sql_agent.feedback.service import FeedbackService
+    from sql_agent.feedback.types import QueryFeedback
+
+    system = create_system()
+    storage = system.instance(StorageBackend)
+    feedback_id = FeedbackService(storage).submit_feedback(
+        QueryFeedback(
+            question=request.question,
+            db_connection_id=request.db_connection_id,
+            sql=request.sql,
+            answer_correct=request.answer_correct,
+            sql_correct=request.sql_correct,
+            wrong_reason=request.wrong_reason,
+            corrected_sql=request.corrected_sql,
+            comment=request.comment,
+        )
+    )
+    return {"id": feedback_id, "status": "created"}
+
+
+@router.get("/feedback")
+async def list_feedback(db_connection_id: str):
+    """查询某个数据库连接下的用户反馈"""
+    from sql_agent.feedback.service import FeedbackService
+
+    system = create_system()
+    storage = system.instance(StorageBackend)
+    return [item.to_dict() for item in FeedbackService(storage).list_feedback(db_connection_id)]
+
+
+@router.get("/verified-queries")
+async def list_verified_queries(db_connection_id: str):
+    """查询某个数据库连接下沉淀出的 verified queries"""
+    from sql_agent.feedback.service import FeedbackService
+
+    system = create_system()
+    storage = system.instance(StorageBackend)
+    return [
+        item.to_dict() for item in FeedbackService(storage).list_verified_queries(db_connection_id)
+    ]
 
 
 # ─── 数据库连接管理 ─────────────────────────────────────

@@ -8,6 +8,7 @@ from typing import Any, Dict, List
 
 from sql_agent.analysis.types import AnalysisResult, KeyFinding, QueryResultPayload
 from sql_agent.ranking.candidate import SQLCandidate
+from sql_agent.visualization.recommender import VisualizationRecommender
 
 
 class HeuristicResultAnalyzer:
@@ -22,6 +23,7 @@ class HeuristicResultAnalyzer:
 
     def analyze(self, question: str, candidate: SQLCandidate, max_rows: int = 20) -> AnalysisResult:
         result = self._build_result_payload(candidate, max_rows)
+        visualization = VisualizationRecommender().recommend(question, result).to_dict()
         if not candidate.execution.success:
             return AnalysisResult(
                 answer="SQL 未成功执行，无法基于数据给出答案。",
@@ -29,6 +31,7 @@ class HeuristicResultAnalyzer:
                 summary=f"候选 SQL 执行失败：{candidate.execution.error or '未知错误'}",
                 limitations=["没有可用的 SQL 执行结果，因此不能生成数据结论。"],
                 followup_questions=["是否需要查看 SQL 错误并尝试修正？"],
+                visualization=visualization,
             )
 
         if result.row_count == 0 or not result.rows:
@@ -44,6 +47,7 @@ class HeuristicResultAnalyzer:
                     "是否需要放宽筛选条件？",
                     "是否需要检查相关表中是否存在对应数据？",
                 ],
+                visualization=visualization,
             )
 
         if len(result.rows) == 1 and len(result.columns) == 1:
@@ -64,6 +68,7 @@ class HeuristicResultAnalyzer:
                     "如果业务口径需要过滤状态、时间范围或权限范围，需要在 SQL 中显式增加条件。",
                 ],
                 followup_questions=self._suggest_followups(question, result),
+                visualization=visualization,
             )
 
         key_findings = self._build_table_findings(result)
@@ -77,6 +82,7 @@ class HeuristicResultAnalyzer:
                 "如需严格业务结论，应确认统计口径、时间范围和过滤条件。",
             ],
             followup_questions=self._suggest_followups(question, result),
+            visualization=visualization,
         )
 
     def _build_result_payload(self, candidate: SQLCandidate, max_rows: int) -> QueryResultPayload:
@@ -262,6 +268,7 @@ SQL result：
             or fallback_result.limitations,
             followup_questions=[str(item) for item in payload.get("followup_questions", [])]
             or fallback_result.followup_questions,
+            visualization=fallback_result.visualization,
         )
 
     def _is_grounded_evidence(self, evidence: str, result: QueryResultPayload) -> bool:

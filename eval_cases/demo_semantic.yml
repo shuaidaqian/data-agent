@@ -1,0 +1,12 @@
+cases:
+  - id: employee_count
+    question: 员工数量是多少？
+    expected_sql_contains:
+      - COUNT
+      - employees
+    expected_result:
+      cnt: 4
+    expected_semantic_metrics:
+      - employee_count
+    required_evidence:
+      - "SQL result: cnt = 4"

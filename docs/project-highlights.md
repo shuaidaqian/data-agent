@@ -2,7 +2,7 @@
 
 ## 一句话定位
 
-这是一个参考 Dataherald 架构并结合 Data Agent 思路重构的轻量级 NL-to-SQL / NL-to-data-answer Agent 系统。它不是简单让 LLM 一次性生成 SQL，而是把数据库环境感知、工具调用、Schema Linking、多轮记忆、执行反馈自纠错、候选 SQL 证据化排序和 grounded 结果分析串成一个可测试的工程闭环。
+这是一个参考 Dataherald 架构并结合 Data Agent 思路重构的轻量级企业数据问答 Agent 系统。它不是简单让 LLM 一次性生成 SQL，而是把 Semantic Layer、SemanticQueryPlan、数据库环境感知、工具调用、Schema Linking、多轮记忆、执行反馈自纠错、候选 SQL 证据化排序、grounded 结果分析、反馈学习和离线评估串成一个可测试的工程闭环。
 
 ## 面试官容易眼前一亮的亮点
 
@@ -99,9 +99,24 @@
 
 > 我认为 NL-to-SQL 不能只依赖一次生成，所以实现了执行反馈闭环。SQL 生成后会真实执行，根据错误信息或结果反馈再让模型修正。
 
-### 7. 多候选 SQL 证据化排序
+### 7. Semantic Layer + SemanticQueryPlan
 
-这是当前最新增强，也是最值得重点展示的亮点。
+这是当前最能拉开项目层次的新增亮点。
+
+当前能力：
+
+- 通过 YAML 语义模型定义指标、维度、同义词和默认过滤条件。
+- 用户问题先命中指标和维度，再生成 `SemanticQueryPlan`。
+- 语义计划经过白名单校验后编译为 SQL。
+- SQL 不再只是 LLM 直接输出，而是可解释、可校验计划的编译产物。
+
+面试表达：
+
+> 我后来发现 NL-to-SQL 的核心难点不是 SQL 语法，而是业务语义和指标口径。所以我加了一层轻量 Semantic Layer，把“员工数量”这类业务指标、同义词、维度和默认过滤条件显式建模。用户问题会先解析成 SemanticQueryPlan，再编译为 SQL，这样查询逻辑可以被审查，而不是完全依赖 LLM 猜。
+
+### 8. 多候选 SQL 证据化排序
+
+这是结果可靠性链路里的关键增强，和 Semantic Layer、verified query 一起构成候选决策层。
 
 当前能力：
 
@@ -118,7 +133,7 @@
 
 > 系统不会盲信第一条 SQL，而是对候选 SQL 做执行验证和证据化排序。最终返回的不只是 SQL，还有候选分数、执行行数、结果列和选择依据，后续自然语言答案也只基于这份受控执行结果生成。
 
-### 8. Grounded 结果分析，不止返回 SQL
+### 9. Grounded 结果分析，不止返回 SQL
 
 这是把项目从“SQL 生成器”推进到“数据问答 Agent”的关键增强。
 
@@ -134,7 +149,22 @@
 
 > 这个设计来自需求本身：业务用户真正要的是数据答案，不是 SQL 字符串。所以我让系统执行最优候选 SQL，把结果作为可信证据返回；自然语言分析只允许基于这份结果生成，LLM 的作用是表达，不是取数。这样既让回答更饱满，也保留了 SQL 和 evidence 作为审计依据。
 
-### 9. 可替换 IoC 架构
+### 10. Feedback + Evaluation Loop
+
+这是让项目更像真实企业系统的一层。
+
+当前能力：
+
+- `POST /api/v1/feedback` 支持用户反馈 SQL 和答案是否正确。
+- 如果反馈中包含 corrected SQL，系统会沉淀为 verified query。
+- 后续相似问题会优先召回 verified query，并加入候选 SQL 排序。
+- `EvaluationHarness` 支持衡量 valid rate、execution accuracy、answer grounding rate、semantic plan accuracy 和 verified query hit rate。
+
+面试表达：
+
+> 我没有把错误处理停留在单次自纠错，而是增加了反馈闭环。用户修正后的 SQL 会沉淀成 verified query，下次类似问题可以优先复用；同时我做了离线评估框架，用 valid rate、execution accuracy 和 answer grounding rate 衡量每次迭代是否真的变好。
+
+### 11. 可替换 IoC 架构
 
 项目通过 `System` 和环境变量注册实现类。
 
@@ -150,7 +180,7 @@
 
 > 我把 LLM、存储、向量库、上下文检索和评估器都抽象成可替换组件，业务代码依赖接口而不是具体 SDK，方便后续切 OpenAI、Azure、本地模型或不同向量库。
 
-### 10. 测试覆盖不是摆设
+### 12. 测试覆盖不是摆设
 
 当前根目录重构版测试覆盖：
 
@@ -164,6 +194,10 @@
 - IoC 注册。
 - 候选 SQL Ranking。
 - ResultAnalyzer grounded 输出和 LLM 回退保护。
+- Semantic Layer 和 SemanticQueryPlan。
+- FeedbackService 和 verified query。
+- VisualizationRecommender。
+- Evaluation Harness。
 - 自纠错。
 - Evaluator。
 - 真实 OpenAI/MongoDB/ChromaDB 集成测试骨架。
@@ -171,7 +205,7 @@
 最新验证结果：
 
 ```text
-90 passed, 3 skipped, 2 warnings
+104 passed, 3 skipped, 2 warnings
 ```
 
 面试表达：
@@ -196,15 +230,17 @@
    - 执行证据排序。
    - API 候选透明返回。
    - grounded 结果分析。
-5. 最终系统从“LLM 生成 SQL”升级为“Agent 感知数据库、调用工具、基于执行证据决策，并输出可追溯数据答案”。
+   - Semantic Layer。
+   - Feedback + Evaluation Loop。
+5. 最终系统从“LLM 生成 SQL”升级为“Agent 感知数据库、理解业务语义、调用工具、基于执行证据决策，并输出可追溯数据答案”。
 
 ## 可以直接放进简历的描述
 
-> 基于 Dataherald 架构重构 NL-to-SQL / NL-to-data-answer Agent 原型，实现原生 ReAct 和 Plan-and-Solve 双 Agent 路由、Schema Scanner/Linking、多轮会话记忆、DIN/DAIL 风格执行反馈自纠错，并进一步加入多候选 SQL 执行验证、证据化排序和 grounded 结果分析机制。系统通过 IoC 支持 LLM、存储、向量库和评估器替换，提供 FastAPI 接口，使用 SQLite + MockLLM 完成端到端测试，核心模块测试 90 passed。
+> 基于 Dataherald 架构重构企业数据问答 Agent 原型，实现 Semantic Layer 与 SemanticQueryPlan 中间表示、原生 ReAct / Plan-and-Solve 双 Agent 路由、Schema Scanner/Linking、多轮会话记忆、DIN/DAIL 风格执行反馈自纠错、多候选 SQL 执行验证与证据化排序、grounded 结果分析、Feedback verified query 沉淀和离线 Evaluation Harness。系统提供 FastAPI 接口，使用 SQLite + MockLLM 完成端到端测试，核心模块测试 104 passed。
 
 ## 面试时可以主动展示的接口返回
 
-重点展示 `/api/v1/question` 返回中的 `answer`、`result`、`analysis` 和 `candidates` 字段：
+重点展示 `/api/v1/question` 返回中的 `answer`、`semantic_plan`、`result`、`analysis`、`visualization` 和 `candidates` 字段：
 
 ```json
 {
@@ -212,6 +248,14 @@
   "sql": "SELECT COUNT(*) AS cnt FROM employees",
   "status": "VALID",
   "confidence_score": 0.85,
+  "semantic_plan": {
+    "intent": "metric_query",
+    "metrics": ["employee_count"],
+    "dimensions": [],
+    "filters": [],
+    "order_by": [],
+    "limit": null
+  },
   "result": {
     "columns": ["cnt"],
     "rows": [{"cnt": 1}],
@@ -225,6 +269,11 @@
     ],
     "limitations": ["该结论仅基于当前数据库快照。"],
     "followup_questions": ["是否需要按类别或部门进一步拆分？"]
+  },
+  "visualization": {
+    "chart_type": "metric_card",
+    "title": "员工数量是多少？",
+    "spec": {"value": {"field": "cnt"}, "label": "cnt"}
   },
   "candidates": [
     {
@@ -243,14 +292,15 @@
 - SQL 选择有执行证据。
 - 系统能解释为什么选这条 SQL。
 - 最终答案不是模型凭空生成，而是绑定到 SQL result evidence。
+- 业务查询逻辑可以通过 `semantic_plan` 审查。
 
 ## 后续继续增强的高价值方向
 
-1. 真正多策略候选生成
-   - conservative SQL
-   - join-aware SQL
-   - aggregation-first SQL
-   - CTE-based SQL
+1. 强化 Semantic Layer
+   - 多指标组合。
+   - 跨表维度 Join 编译。
+   - 指标版本和 owner。
+   - 语义模型 API 管理。
 
 2. SQL AST 级权限校验
    - alias 解析。
@@ -258,9 +308,10 @@
    - 子查询列级校验。
    - 聚合表达式解析。
 
-3. Schema Memory
+3. Schema / Semantic Memory
    - 将列语义、样本值、业务同义词写入向量库。
    - 支持中文业务词和英文表字段之间的语义召回。
+   - verified query 使用向量召回替代轻量 token overlap。
 
 4. 结果洞察增强
    - 基于 SQL 执行结果推荐图表类型。
