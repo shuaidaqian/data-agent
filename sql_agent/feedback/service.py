@@ -3,9 +3,15 @@
 from __future__ import annotations
 
 import re
-from typing import List
+from typing import Any, Dict, List
 
-from sql_agent.feedback.types import QueryFeedback, VerifiedQuery, VerifiedQueryMatch
+from sql_agent.feedback.types import (
+    QueryFeedback,
+    VerifiedQuery,
+    VerifiedQueryLifecycle,
+    VerifiedQueryMatch,
+    WrongReason,
+)
 from sql_agent.storage.db import StorageBackend
 
 
@@ -26,9 +32,44 @@ class FeedbackService:
                 sql=feedback.corrected_sql,
                 db_connection_id=feedback.db_connection_id,
                 source_feedback_id=feedback_id,
+                lifecycle=VerifiedQueryLifecycle.PENDING_REVIEW.value,
+                quality_signals={
+                    "wrong_reason": feedback.wrong_reason,
+                    "answer_correct": feedback.answer_correct,
+                    "sql_correct": feedback.sql_correct,
+                },
             )
             self.storage.insert(self.VERIFIED_COLLECTION, verified.to_dict())
         return feedback_id
+
+    def suggest_semantic_updates(self, feedback: QueryFeedback) -> List[Dict[str, Any]]:
+        """根据结构化反馈生成语义模型更新建议，不直接修改模型。"""
+
+        if feedback.wrong_reason != WrongReason.WRONG_METRIC_DEFINITION.value:
+            return []
+        if not feedback.corrected_sql:
+            return []
+
+        filter_match = re.search(
+            r"\bWHERE\s+([A-Za-z_][\w.]*)\s*(=|!=|<>|>=|<=|>|<)\s*['\"]?([^'\"\s;]+)",
+            feedback.corrected_sql,
+            flags=re.IGNORECASE,
+        )
+        if not filter_match:
+            return []
+
+        field, op, value = filter_match.groups()
+        return [
+            {
+                "type": "metric_default_filter",
+                "db_connection_id": feedback.db_connection_id,
+                "question": feedback.question,
+                "field": field.split(".")[-1],
+                "op": op,
+                "value": value,
+                "reason": feedback.comment or "反馈表明当前指标口径缺少默认过滤条件。",
+            }
+        ]
 
     def list_feedback(self, db_connection_id: str) -> List[QueryFeedback]:
         rows = self.storage.find(self.FEEDBACK_COLLECTION, {"db_connection_id": db_connection_id})

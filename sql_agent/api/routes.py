@@ -144,7 +144,7 @@ def create_semantic_plan(system: System, question: str):
     validation = SemanticPlanValidator(registry).validate(plan)
     if not validation.valid or not plan.metrics:
         return plan, []
-    sql = SemanticSQLCompiler().compile(plan)
+    sql = SemanticSQLCompiler(registry).compile(plan)
     return plan, [sql] if sql else []
 
 
@@ -268,6 +268,7 @@ async def ask_question(request: QuestionRequest):
 
             candidate_sqls = CandidateGenerator.collect(result.sql, candidate_step_texts)
             candidate_sqls = [*semantic_candidate_sqls, *candidate_sqls]
+            verified_sqls = []
             try:
                 from sql_agent.feedback.service import FeedbackService
 
@@ -275,6 +276,7 @@ async def ask_question(request: QuestionRequest):
                     request.question,
                     request.db_connection_id,
                 )
+                verified_sqls = [match.sql for match in verified_matches]
                 candidate_sqls = [match.sql for match in verified_matches] + candidate_sqls
             except Exception:
                 logger.debug("Verified query retrieval skipped", exc_info=True)
@@ -282,6 +284,8 @@ async def ask_question(request: QuestionRequest):
                 database=database,
                 table_descriptions=table_descriptions,
                 evaluator=evaluator,
+                semantic_plan=semantic_plan,
+                verified_sqls=verified_sqls,
             ).rank(request.question, candidate_sqls)
             if ranked_candidates:
                 best_candidate = ranked_candidates[0]
@@ -317,7 +321,11 @@ async def ask_question(request: QuestionRequest):
                 {
                     "summary": analysis.summary,
                     "key_findings": [
-                        {"claim": finding.claim, "evidence": finding.evidence}
+                        {
+                            "claim": finding.claim,
+                            "evidence": finding.evidence,
+                            "finding_type": finding.finding_type,
+                        }
                         for finding in analysis.key_findings
                     ],
                     "limitations": analysis.limitations,

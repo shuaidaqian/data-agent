@@ -1,4 +1,4 @@
-# SQL Agent 项目亮点梳理
+﻿# SQL Agent 项目亮点梳理
 
 ## 一句话定位
 
@@ -109,10 +109,11 @@
 - 用户问题先命中指标和维度，再生成 `SemanticQueryPlan`。
 - 语义计划经过白名单校验后编译为 SQL。
 - SQL 不再只是 LLM 直接输出，而是可解释、可校验计划的编译产物。
+- Semantic Layer 2.0 进一步补齐指标版本、owner、certified 状态、时间维度、时间粒度、多指标计划、简单关系 Join 和歧义澄清。
 
 面试表达：
 
-> 我后来发现 NL-to-SQL 的核心难点不是 SQL 语法，而是业务语义和指标口径。所以我加了一层轻量 Semantic Layer，把“员工数量”这类业务指标、同义词、维度和默认过滤条件显式建模。用户问题会先解析成 SemanticQueryPlan，再编译为 SQL，这样查询逻辑可以被审查，而不是完全依赖 LLM 猜。
+> 我后来发现 NL-to-SQL 的核心难点不是 SQL 语法，而是业务语义和指标口径。所以我加了一层轻量 Semantic Layer，把“员工数量”这类业务指标、同义词、维度、时间粒度、默认过滤条件和认证状态显式建模。用户问题会先解析成 SemanticQueryPlan，再编译为 SQL；多指标和歧义场景也能结构化表达，这样查询逻辑可以被审查，而不是完全依赖 LLM 猜。
 
 ### 8. 多候选 SQL 证据化排序
 
@@ -126,6 +127,8 @@
 - 候选 SQL 执行验证。
 - 收集 row count、columns、preview、error。
 - 综合 schema、执行结果、问题意图和 Evaluator 分数排序。
+- 输出 `score_breakdown`、`selection_reason`、`source` 和 `result_shape`，让候选选择可以被复盘。
+- verified query 命中和 semantic plan 匹配会进入评分，但仍必须通过真实执行。
 - API 返回 `candidates`，让系统选择过程透明可解释。
 - 向 API 透出最优候选 SQL 的执行结果，作为最终答案的证据来源。
 
@@ -144,6 +147,7 @@
 - 可选启用 `LLMResultAnalyzer`，让自然语言回答更流畅，但 LLM 只接收受控 SQL result，不接收数据库连接，也不执行 SQL。
 - 每个关键发现必须包含 `SQL result:` evidence。
 - 如果 LLM 输出无法解析、缺少 evidence，或回答、摘要、结论中包含 SQL result 中不存在的数值，系统会自动回退到启发式分析。
+- ResultAnalyzer 2.0 支持发现类型、Top K、max/min、简单占比和 why 类问题限制说明。对于“为什么”问题，它不会从相关性结果里硬推因果，而是在 limitations 中明确说明当前 SQL result 不能证明原因。
 
 面试表达：
 
@@ -158,7 +162,10 @@
 - `POST /api/v1/feedback` 支持用户反馈 SQL 和答案是否正确。
 - 如果反馈中包含 corrected SQL，系统会沉淀为 verified query。
 - 后续相似问题会优先召回 verified query，并加入候选 SQL 排序。
+- verified query 有 `PENDING_REVIEW`、`VERIFIED`、`DEPRECATED`、`REJECTED` 生命周期和质量信号。
+- 对指标定义错误的反馈可以生成语义模型更新建议，例如给指标补默认过滤条件。
 - `EvaluationHarness` 支持衡量 valid rate、execution accuracy、answer grounding rate、semantic plan accuracy 和 verified query hit rate。
+- Evaluation Benchmark 2.0 支持 tag-level metrics、错误归因、API case runner、demo SQLite 构造和 Markdown 报告输出。
 
 面试表达：
 
@@ -205,7 +212,7 @@
 最新验证结果：
 
 ```text
-104 passed, 3 skipped, 2 warnings
+119 passed, 3 skipped, 2 warnings
 ```
 
 面试表达：
@@ -236,7 +243,7 @@
 
 ## 可以直接放进简历的描述
 
-> 基于 Dataherald 架构重构企业数据问答 Agent 原型，实现 Semantic Layer 与 SemanticQueryPlan 中间表示、原生 ReAct / Plan-and-Solve 双 Agent 路由、Schema Scanner/Linking、多轮会话记忆、DIN/DAIL 风格执行反馈自纠错、多候选 SQL 执行验证与证据化排序、grounded 结果分析、Feedback verified query 沉淀和离线 Evaluation Harness。系统提供 FastAPI 接口，使用 SQLite + MockLLM 完成端到端测试，核心模块测试 104 passed。
+> 基于 Dataherald 架构重构企业数据问答 Agent 原型，实现 Semantic Layer 2.0 与 SemanticQueryPlan 中间表示、原生 ReAct / Plan-and-Solve 双 Agent 路由、Schema Scanner/Linking、多轮会话记忆、DIN/DAIL 风格执行反馈自纠错、多候选 SQL 执行验证与可解释排序、grounded 结果洞察、Feedback verified query 生命周期、可消费 ECharts 可视化资产和离线 Evaluation Benchmark。系统提供 FastAPI 接口，使用 SQLite + MockLLM 完成端到端测试，核心模块测试 119 passed。
 
 ## 面试时可以主动展示的接口返回
 
@@ -297,9 +304,8 @@
 ## 后续继续增强的高价值方向
 
 1. 强化 Semantic Layer
-   - 多指标组合。
-   - 跨表维度 Join 编译。
-   - 指标版本和 owner。
+   - SQL AST 级语义校验。
+   - 多跳 Join 优化。
    - 语义模型 API 管理。
 
 2. SQL AST 级权限校验

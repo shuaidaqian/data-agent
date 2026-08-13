@@ -19,6 +19,8 @@ class EvaluationCase:
     expected_result: Dict[str, Any] = field(default_factory=dict)
     expected_semantic_metrics: List[str] = field(default_factory=list)
     required_evidence: List[str] = field(default_factory=list)
+    expected_visualization_type: str = ""
+    tags: List[str] = field(default_factory=list)
 
 
 @dataclass
@@ -31,6 +33,8 @@ class EvaluationReport:
     answer_grounding_rate: float
     semantic_plan_accuracy: float
     verified_query_hit_rate: float = 0.0
+    tag_metrics: Dict[str, Dict[str, Any]] = field(default_factory=dict)
+    error_breakdown: Dict[str, int] = field(default_factory=dict)
 
     def to_markdown(self) -> str:
         return "\n".join(
@@ -43,6 +47,18 @@ class EvaluationReport:
                 f"answer_grounding_rate: {self.answer_grounding_rate:.2f}",
                 f"semantic_plan_accuracy: {self.semantic_plan_accuracy:.2f}",
                 f"verified_query_hit_rate: {self.verified_query_hit_rate:.2f}",
+                "",
+                "## Tag Metrics",
+                *[
+                    f"- {tag}: total={metrics['total']}, valid_rate={metrics['valid_rate']:.2f}, execution_accuracy={metrics['execution_accuracy']:.2f}, grounding_rate={metrics['grounding_rate']:.2f}"
+                    for tag, metrics in sorted(self.tag_metrics.items())
+                ],
+                "",
+                "## Error Breakdown",
+                *[
+                    f"- {error_type}: {count}"
+                    for error_type, count in sorted(self.error_breakdown.items())
+                ],
             ]
         )
 
@@ -52,6 +68,10 @@ class EvaluationHarness:
 
     def __init__(self, cases: List[EvaluationCase]):
         self.cases = cases
+
+    @classmethod
+    def from_cases(cls, cases: List[Dict[str, Any]]) -> "EvaluationHarness":
+        return cls([EvaluationCase(**item) for item in cases])
 
     @classmethod
     def from_yaml(cls, path: str | Path) -> "EvaluationHarness":
@@ -66,29 +86,69 @@ class EvaluationHarness:
 
         valid = 0
         execution = 0
-        grounded = 0
+        grounded_total = 0
         semantic = 0
         verified_hits = 0
+        tag_buckets: Dict[str, Dict[str, int]] = {}
+        error_breakdown = {
+            "SEMANTIC_MISS": 0,
+            "SQL_INVALID": 0,
+            "EXECUTION_MISMATCH": 0,
+            "UNGROUNDED_ANSWER": 0,
+            "MISSING_EVIDENCE": 0,
+            "WRONG_VISUALIZATION": 0,
+        }
         for case in self.cases:
             response = responses.get(case.id, {})
-            if self._is_valid_sql_response(case, response):
+            valid_sql = self._is_valid_sql_response(case, response)
+            execution_match = self._matches_expected_result(case, response)
+            grounded_match = self._is_grounded(case, response)
+            semantic_match = self._matches_semantic_plan(case, response)
+            visualization_match = self._matches_visualization(case, response)
+
+            if valid_sql:
                 valid += 1
-            if self._matches_expected_result(case, response):
+            else:
+                error_breakdown["SQL_INVALID"] += 1
+            if execution_match:
                 execution += 1
-            if self._is_grounded(case, response):
-                grounded += 1
-            if self._matches_semantic_plan(case, response):
+            else:
+                error_breakdown["EXECUTION_MISMATCH"] += 1
+            if grounded_match:
+                grounded_total += 1
+                grounded_count = 1
+            else:
+                grounded_count = 0
+                error_breakdown["UNGROUNDED_ANSWER"] += 1
+                if case.required_evidence:
+                    error_breakdown["MISSING_EVIDENCE"] += 1
+            if semantic_match:
                 semantic += 1
+            else:
+                error_breakdown["SEMANTIC_MISS"] += 1
+            if not visualization_match:
+                error_breakdown["WRONG_VISUALIZATION"] += 1
             if response.get("used_verified_query"):
                 verified_hits += 1
+            for tag in case.tags:
+                bucket = tag_buckets.setdefault(
+                    tag,
+                    {"total": 0, "valid": 0, "execution": 0, "grounded": 0},
+                )
+                bucket["total"] += 1
+                bucket["valid"] += int(valid_sql)
+                bucket["execution"] += int(execution_match)
+                bucket["grounded"] += grounded_count
 
         return EvaluationReport(
             total=total,
             valid_rate=valid / total,
             execution_accuracy=execution / total,
-            answer_grounding_rate=grounded / total,
+            answer_grounding_rate=grounded_total / total,
             semantic_plan_accuracy=semantic / total,
             verified_query_hit_rate=verified_hits / total,
+            tag_metrics=self._build_tag_metrics(tag_buckets),
+            error_breakdown=error_breakdown,
         )
 
     def _is_valid_sql_response(self, case: EvaluationCase, response: Dict[str, Any]) -> bool:
@@ -112,6 +172,28 @@ class EvaluationHarness:
     def _matches_semantic_plan(self, case: EvaluationCase, response: Dict[str, Any]) -> bool:
         metrics = response.get("semantic_plan", {}).get("metrics", [])
         return all(metric in metrics for metric in case.expected_semantic_metrics)
+
+    def _matches_visualization(self, case: EvaluationCase, response: Dict[str, Any]) -> bool:
+        visualization = response.get("visualization", {})
+        if visualization.get("validation", {}).get("valid") is False:
+            return False
+        if not case.expected_visualization_type:
+            return True
+        return visualization.get("chart_type") == case.expected_visualization_type
+
+    def _build_tag_metrics(
+        self, tag_buckets: Dict[str, Dict[str, int]]
+    ) -> Dict[str, Dict[str, Any]]:
+        output = {}
+        for tag, bucket in tag_buckets.items():
+            total = bucket["total"] or 1
+            output[tag] = {
+                "total": bucket["total"],
+                "valid_rate": bucket["valid"] / total,
+                "execution_accuracy": bucket["execution"] / total,
+                "grounding_rate": bucket["grounded"] / total,
+            }
+        return output
 
 
 if __name__ == "__main__":

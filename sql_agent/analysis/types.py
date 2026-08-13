@@ -3,7 +3,20 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
+from enum import Enum
 from typing import Any, Dict, List, Optional
+
+
+class FindingType(str, Enum):
+    """结果分析发现类型。"""
+
+    SINGLE_METRIC = "single_metric"
+    TOP_K = "top_k"
+    COMPARISON = "comparison"
+    TREND = "trend"
+    DISTRIBUTION = "distribution"
+    EMPTY_RESULT = "empty_result"
+    DATA_QUALITY_WARNING = "data_quality_warning"
 
 
 @dataclass
@@ -22,6 +35,7 @@ class KeyFinding:
 
     claim: str
     evidence: str
+    finding_type: str = FindingType.SINGLE_METRIC.value
 
 
 @dataclass

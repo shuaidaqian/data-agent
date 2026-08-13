@@ -4,7 +4,30 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
+from enum import Enum
 from typing import Any, Dict, Optional
+
+
+class WrongReason(str, Enum):
+    """结构化错误原因。"""
+
+    WRONG_TABLE = "WRONG_TABLE"
+    WRONG_COLUMN = "WRONG_COLUMN"
+    WRONG_FILTER = "WRONG_FILTER"
+    WRONG_JOIN = "WRONG_JOIN"
+    WRONG_AGGREGATION = "WRONG_AGGREGATION"
+    WRONG_METRIC_DEFINITION = "WRONG_METRIC_DEFINITION"
+    UNGROUNDED_ANSWER = "UNGROUNDED_ANSWER"
+    VISUALIZATION_WRONG = "VISUALIZATION_WRONG"
+
+
+class VerifiedQueryLifecycle(str, Enum):
+    """verified query 生命周期。"""
+
+    PENDING_REVIEW = "PENDING_REVIEW"
+    VERIFIED = "VERIFIED"
+    DEPRECATED = "DEPRECATED"
+    REJECTED = "REJECTED"
 
 
 @dataclass
@@ -35,6 +58,8 @@ class VerifiedQuery:
     db_connection_id: str
     id: Optional[str] = None
     source_feedback_id: Optional[str] = None
+    lifecycle: str = VerifiedQueryLifecycle.PENDING_REVIEW.value
+    quality_signals: Dict[str, Any] = field(default_factory=dict)
     created_at: datetime = field(default_factory=datetime.now)
 
     def to_dict(self) -> Dict[str, Any]:

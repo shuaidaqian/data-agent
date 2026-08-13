@@ -6,7 +6,7 @@ import json
 import re
 from typing import Any, Dict, List
 
-from sql_agent.analysis.types import AnalysisResult, KeyFinding, QueryResultPayload
+from sql_agent.analysis.types import AnalysisResult, FindingType, KeyFinding, QueryResultPayload
 from sql_agent.ranking.candidate import SQLCandidate
 from sql_agent.visualization.recommender import VisualizationRecommender
 
@@ -61,6 +61,7 @@ class HeuristicResultAnalyzer:
                     KeyFinding(
                         claim=f"{column} = {value}",
                         evidence=f"SQL result: {column} = {value}",
+                        finding_type=FindingType.SINGLE_METRIC.value,
                     )
                 ],
                 limitations=[
@@ -72,15 +73,21 @@ class HeuristicResultAnalyzer:
             )
 
         key_findings = self._build_table_findings(result)
+        limitations = [
+            "该分析只基于返回的结果预览，不代表未返回数据中的完整分布。",
+            "如需严格业务结论，应确认统计口径、时间范围和过滤条件。",
+        ]
+        if self._asks_why(question):
+            limitations.insert(
+                0,
+                "当前 SQL 结果只能说明相关数值现象，不能单独证明原因或因果关系。",
+            )
         return AnalysisResult(
             answer=f"查询返回 {result.row_count} 行结果，请结合结果明细查看。",
             result=result,
             summary=self._build_summary(result),
             key_findings=key_findings,
-            limitations=[
-                "该分析只基于返回的结果预览，不代表未返回数据中的完整分布。",
-                "如需严格业务结论，应确认统计口径、时间范围和过滤条件。",
-            ],
+            limitations=limitations,
             followup_questions=self._suggest_followups(question, result),
             visualization=visualization,
         )
@@ -118,21 +125,88 @@ class HeuristicResultAnalyzer:
 
         if numeric_columns:
             metric = numeric_columns[-1]
-            best_row = max(result.rows, key=lambda row: self._as_number(row.get(metric)))
+            sorted_rows = sorted(
+                result.rows,
+                key=lambda row: self._as_number(row.get(metric)),
+                reverse=True,
+            )
+            best_row = sorted_rows[0]
             label = self._row_label(best_row, text_columns)
             value = best_row.get(metric)
             claim = (
                 f"{label} 的 {metric} 最高，为 {value}" if label else f"{metric} 最高值为 {value}"
             )
-            evidence = f"SQL result row: {self._format_row(best_row)}"
-            findings.append(KeyFinding(claim=claim, evidence=evidence))
+            evidence = f"SQL result: {self._format_row(best_row)}"
+            findings.append(
+                KeyFinding(
+                    claim=claim,
+                    evidence=evidence,
+                    finding_type=FindingType.TOP_K.value,
+                )
+            )
+            findings.extend(
+                self._build_comparison_findings(result, metric, sorted_rows, text_columns)
+            )
 
         findings.append(
             KeyFinding(
                 claim=f"本次查询返回 {result.row_count} 行。",
-                evidence=f"SQL result row_count = {result.row_count}",
+                evidence=f"SQL result: row_count = {result.row_count}",
+                finding_type=FindingType.DISTRIBUTION.value,
             )
         )
+        return findings
+
+    def _build_comparison_findings(
+        self,
+        result: QueryResultPayload,
+        metric: str,
+        sorted_rows: List[Dict[str, Any]],
+        text_columns: List[str],
+    ) -> List[KeyFinding]:
+        findings = []
+        numeric_values = [
+            self._as_number(row.get(metric)) for row in sorted_rows if row.get(metric) is not None
+        ]
+        if len(numeric_values) < 2:
+            return findings
+
+        top_rows = sorted_rows[: min(3, len(sorted_rows))]
+        top_labels = [
+            f"{self._row_label(row, text_columns) or index + 1}: {row.get(metric)}"
+            for index, row in enumerate(top_rows)
+        ]
+        findings.append(
+            KeyFinding(
+                claim=f"Top {len(top_rows)} 为 " + "，".join(top_labels),
+                evidence="SQL result: " + " | ".join(self._format_row(row) for row in top_rows),
+                finding_type=FindingType.TOP_K.value,
+            )
+        )
+
+        min_row = sorted_rows[-1]
+        max_row = sorted_rows[0]
+        max_value = self._as_number(max_row.get(metric))
+        min_value = self._as_number(min_row.get(metric))
+        findings.append(
+            KeyFinding(
+                claim=f"{metric} 最大值 {max_value:g}，最小值 {min_value:g}，差值 {max_value - min_value:g}。",
+                evidence=f"SQL result: max({self._format_row(max_row)}), min({self._format_row(min_row)})",
+                finding_type=FindingType.COMPARISON.value,
+            )
+        )
+
+        total = sum(value for value in numeric_values if value != float("-inf"))
+        if total > 0:
+            top_share = max_value / total
+            label = self._row_label(max_row, text_columns)
+            findings.append(
+                KeyFinding(
+                    claim=f"{label or metric + '最高项'} 占总量 {top_share:.2%}。",
+                    evidence=f"SQL result: {metric} = {max_value:g}, total({metric}) = {total:g}",
+                    finding_type=FindingType.COMPARISON.value,
+                )
+            )
         return findings
 
     def _build_summary(self, result: QueryResultPayload) -> str:
@@ -162,6 +236,10 @@ class HeuristicResultAnalyzer:
 
     def _as_number(self, value: Any) -> float:
         return float(value) if self._is_number(value) and value is not None else float("-inf")
+
+    def _asks_why(self, question: str) -> bool:
+        text = question.lower()
+        return any(token in text for token in ["为什么", "原因", "why"])
 
 
 class LLMResultAnalyzer:

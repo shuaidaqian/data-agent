@@ -1,4 +1,4 @@
-# SQL Agent 秋招面试准备指南
+﻿# SQL Agent 秋招面试准备指南
 
 ## 目标
 
@@ -75,7 +75,7 @@
 
 你要能在 2 分钟内讲清楚：
 
-> 这个项目是为了解决企业内部业务人员不会写 SQL，但又需要查数和理解结果的问题。传统方案要么依赖数据分析师手写 SQL，要么 BI 报表不够灵活。我们做的是一个轻量级企业数据问答 Agent：用户输入自然语言问题后，系统先通过 Semantic Layer 命中业务指标、维度、同义词和默认过滤条件，生成可解释的 SemanticQueryPlan，再编译成 SQL 候选；同时系统会结合 verified query 和 Agent 生成的 SQL，统一做执行验证和候选排序。最后，系统把最优候选的执行结果透出给 API，基于 SQL result evidence 生成答案和图表建议。用户反馈如果包含修正 SQL，还会沉淀成 verified query，后续类似问题可以复用。
+> 这个项目是为了解决企业内部业务人员不会写 SQL，但又需要查数和理解结果的问题。传统方案要么依赖数据分析师手写 SQL，要么 BI 报表不够灵活。我们做的是一个轻量级企业数据问答 Agent：用户输入自然语言问题后，系统先通过 Semantic Layer 命中业务指标、维度、同义词、默认过滤条件、时间粒度和认证状态，生成可解释的 SemanticQueryPlan，再编译成 SQL 候选；同时系统会结合 verified query 和 Agent 生成的 SQL，统一做执行验证、结果形状校验和候选排序。最后，系统把最优候选的执行结果透出给 API，基于 SQL result evidence 生成答案、洞察和 ECharts 图表建议。用户反馈如果包含修正 SQL，还会沉淀成带生命周期的 verified query，后续类似问题可以复用。
 
 ## 推荐阅读顺序
 
@@ -353,7 +353,7 @@ DROP TABLE employees
 当前测试结果要记住：
 
 ```text
-104 passed, 3 skipped, 2 warnings
+119 passed, 3 skipped, 2 warnings
 ```
 
 面试时可以说：
@@ -445,9 +445,9 @@ python -m compileall -q sql_agent tests main.py
 >
 > 我的主要工作是核心 NL-to-SQL / NL-to-data-answer 链路。我没有直接调用 LLM 生成 SQL，而是把系统拆成几层：首先通过 SQLAlchemy 扫描数据库 schema，包括表、列、主外键、样本值、distinct/null 统计和列语义类型；然后 Agent 根据问题复杂度选择 ReAct 或 Plan-and-Solve，通过受控工具获取相关表结构、检查列值、执行 SQL；生成 SQL 后再用执行反馈做 DAIL 风格自纠错。
 >
-> 后面我进一步加了候选 SQL 证据化排序和 grounded 结果分析。系统不会盲信 LLM 第一条输出，而是收集候选 SQL，做 schema 白名单校验、危险 SQL 拦截、真实执行，并根据执行结果、问题意图和评估分排序。API 返回最终 SQL 的同时，也返回 result、analysis 和 candidates。最终自然语言答案只基于系统执行 SQL 得到的结果，关键发现必须带 `SQL result:` evidence。
+> 后面我进一步加了候选 SQL 可解释排序和 grounded 结果洞察。系统不会盲信 LLM 第一条输出，而是收集语义 SQL、verified query 和 Agent SQL 候选，做 schema 白名单校验、危险 SQL 拦截、真实执行、结果形状校验，并根据执行结果、问题意图、verified 命中、semantic plan 匹配和评估分排序。API 返回最终 SQL 的同时，也返回 result、analysis、visualization 和 candidates。最终自然语言答案只基于系统执行 SQL 得到的结果，关键发现必须带 `SQL result:` evidence。
 >
-> 这个项目最后用 FastAPI 提供接口，用 SQLite + MockLLM 做了端到端测试，核心模块测试是 104 passed。它目前还是 PoC，但已经验证了一个企业级数据问答 Agent 的核心闭环：业务语义建模、环境感知、工具调用、多轮记忆、执行反馈、可解释决策、可追溯回答和反馈评估。
+> 这个项目最后用 FastAPI 提供接口，用 SQLite + MockLLM 做了端到端测试，核心模块测试是 119 passed。它目前还是 PoC，但已经验证了一个企业级数据问答 Agent 的核心闭环：业务语义治理、环境感知、工具调用、多轮记忆、执行反馈、可解释决策、可追溯回答、可消费可视化资产和反馈评估。
 
 ## 项目最难点回答模板
 
@@ -520,7 +520,7 @@ python -m compileall -q sql_agent tests main.py
 
 回答：
 
-> 普通 NL-to-SQL 往往直接返回 LLM 第一条 SQL，但 LLM 可能格式对、语义错。我加入 CandidateRanker，把候选 SQL 逐个做 schema 校验、危险命令拦截、真实执行、证据收集，然后基于执行结果、问题意图和 Evaluator 分数排序。API 会返回 `candidates`，所以系统选择过程是透明的；同时最优候选的执行结果会进入 `result`，成为最终 `answer` 和 `analysis` 的证据源。
+> 普通 NL-to-SQL 往往直接返回 LLM 第一条 SQL，但 LLM 可能格式对、语义错。我加入 CandidateRanker，把候选 SQL 逐个做 schema 校验、危险命令拦截、真实执行、结果形状校验和证据收集，然后基于执行结果、问题意图、verified query 命中、semantic plan 匹配和 Evaluator 分数排序。API 会返回 `score_breakdown`、`selection_reason` 和 `candidates`，所以系统选择过程是透明的；同时最优候选的执行结果会进入 `result`，成为最终 `answer` 和 `analysis` 的证据源。
 
 ### 7. 为什么不只返回 SQL？
 
@@ -622,11 +622,11 @@ python -m compileall -q sql_agent tests main.py
 
 可以直接放简历：
 
-> 基于 Dataherald 架构重构企业数据问答 Agent 原型，实现 Semantic Layer 与 SemanticQueryPlan 中间表示、原生 ReAct / Plan-and-Solve 双 Agent 路由、Schema Scanner/Linking、多轮会话记忆、DIN/DAIL 风格执行反馈自纠错、多候选 SQL 执行验证与证据化排序、grounded 结果分析、Feedback verified query 沉淀和离线 Evaluation Harness。系统提供 FastAPI 接口，使用 SQLite + MockLLM 完成端到端测试，核心模块测试 104 passed。
+> 基于 Dataherald 架构重构企业数据问答 Agent 原型，实现 Semantic Layer 2.0 与 SemanticQueryPlan 中间表示、原生 ReAct / Plan-and-Solve 双 Agent 路由、Schema Scanner/Linking、多轮会话记忆、DIN/DAIL 风格执行反馈自纠错、多候选 SQL 执行验证与可解释排序、grounded 结果洞察、Feedback verified query 生命周期、可消费 ECharts 可视化资产和离线 Evaluation Benchmark。系统提供 FastAPI 接口，使用 SQLite + MockLLM 完成端到端测试，核心模块测试 119 passed。
 
 如果要贴近实习经历：
 
-> 在神州数码实习期间，参与企业数据库问答 Data Agent 原型建设，负责核心 NL-to-SQL / NL-to-data-answer 链路中的 Semantic Layer、Schema 理解、Agent 工具调用、安全校验、SQL 自纠错、候选 SQL 证据化排序、结果 grounded 分析和反馈评估闭环。通过 SQLAlchemy 扫描数据库结构与列级语义，结合业务指标语义模型、ReAct/Plan-and-Solve Agent 和 verified query 反馈学习提升结果可靠性。
+> 在神州数码实习期间，参与企业数据库问答 Data Agent 原型建设，负责核心 NL-to-SQL / NL-to-data-answer 链路中的 Semantic Layer 业务语义治理、Schema 理解、Agent 工具调用、安全校验、SQL 自纠错、候选 SQL 可解释排序、结果 grounded 洞察、可视化资产生成和反馈评估闭环。通过 SQLAlchemy 扫描数据库结构与列级语义，结合业务指标语义模型、ReAct/Plan-and-Solve Agent、verified query 反馈学习和 Evaluation Benchmark 提升结果可靠性。
 
 ## 面试时主动展示什么
 

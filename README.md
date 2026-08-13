@@ -27,8 +27,8 @@ Dataherald 是一个面向企业数据问答场景的开源 NL->SQL 引擎，原
 | 复杂 SQL | 多表 JOIN、CTE、窗口函数支持有限 | Schema Linking、外键路径发现、复杂查询分解 |
 | Self-Correct | 以语法验证为主 | DIN-SQL 风格语义验证 + DAIL-SQL 风格执行反馈修正 |
 | 结果回答 | 主要返回 SQLGeneration | API 透出最优候选执行结果，并基于受控结果生成 grounded answer/summary/key findings |
-| 业务语义 | 主要依赖数据库 schema 和说明 | Semantic Layer 显式建模指标、维度、同义词和默认过滤条件 |
-| 反馈评估 | 缺少闭环 | 用户反馈沉淀 verified query，Evaluation Harness 衡量 valid/execution/grounding 指标 |
+| 业务语义 | 主要依赖数据库 schema 和说明 | Semantic Layer 2.0 显式建模指标治理字段、维度、时间粒度、同义词、默认过滤条件和简单关系 Join |
+| 反馈评估 | 缺少闭环 | 用户反馈沉淀带生命周期的 verified query，Evaluation Benchmark 2.0 衡量 valid/execution/grounding/semantic/visualization 指标并输出错误归因 |
 
 ## 核心架构
 
@@ -102,7 +102,7 @@ ResultAnalyzer
 11. `CandidateRanker` 对候选 SQL 做 schema 校验、执行验证和证据化排序。
 12. API 透出最优候选 SQL 的受控执行结果，包括列名、预览行数、返回行数和截断状态。
 13. `ResultAnalyzer` 基于 SQL 执行结果生成 `answer`、`summary` 和带 evidence 的 `key_findings`。
-14. `VisualizationRecommender` 根据结果形状生成 metric card、bar、line 或 table spec。
+14. `VisualizationRecommender` 根据结果形状生成 metric card、bar、line、table 或 pie 建议，并返回可直接消费的 ECharts option、字段校验结果和 finding 适配信息。
 15. API 返回最终答案、SemanticQueryPlan、SQL、执行结果、分析证据、图表建议、中间步骤、候选证据和错误信息。
 
 ## 项目结构
@@ -121,7 +121,7 @@ sql_agent/
 ├── feedback/      # 用户反馈、verified query 和反馈学习闭环
 ├── visualization/ # 基于 SQL result 的图表推荐和可视化 spec
 ├── storage/       # 存储层，包括 MongoDB 文档存储和 ChromaDB 向量存储
-├── eval/          # SQL 质量评估器
+├── eval/          # SQL 质量评估器、离线 benchmark 和 API case runner
 └── api/           # FastAPI REST 路由
 
 main.py            # FastAPI 应用入口
@@ -319,7 +319,8 @@ services/          # Dataherald 原始多服务参考实现或源码镜像
 - 对候选 SQL 做规范化去重。
 - 执行危险 SQL 拦截和 schema 白名单校验。
 - 执行候选 SQL，收集行数、列名、结果预览和错误。
-- 根据 schema 校验、执行结果、SQL 结构、问题意图和 Evaluator 分数综合排序。
+- 根据 schema 校验、执行结果、SQL 结构、问题意图、verified query 命中、semantic plan 匹配、结果形状和 Evaluator 分数综合排序。
+- 返回 `score_breakdown`、`selection_reason`、`source` 和 `result_shape`，说明候选 SQL 为什么被选择或降权。
 - 向 API 返回 `candidates` 字段，让最终 SQL 的选择过程可解释。
 - 向结果分析层提供最优候选的执行证据，避免后续回答脱离真实数据库结果。
 
@@ -335,13 +336,23 @@ services/          # Dataherald 原始多服务参考实现或源码镜像
 - 维度：如 `department`。
 - 同义词：如“员工数”、“人数”。
 - 默认过滤条件：如只统计 `status = active`。
+- 指标治理信息：`version`、`owner`、`certified`。
+- 时间维度和时间粒度：`day`、`month`、`quarter`、`year`。
+- 简单跨表关系：通过 `relationships` 编译基础 Join。
 - `SemanticQueryPlan`：指标、维度、过滤、排序和 limit 的中间表示。
 
-当配置 `SEMANTIC_MODEL_PATH` 时，API 会优先尝试生成语义计划，并把语义计划编译成 SQL 候选。这样 SQL 不再只是 LLM 的直接输出，而是一个可解释、可校验的编译产物。
+当配置 `SEMANTIC_MODEL_PATH` 时，API 会优先尝试生成语义计划，并把语义计划编译成 SQL 候选。这样 SQL 不再只是 LLM 的直接输出，而是一个可解释、可校验的编译产物。当前 planner 支持多指标命中、时间粒度识别和同名指标歧义澄清；当多个指标共享同一业务词时，会返回 `NEEDS_CLARIFICATION` 和候选指标，而不是强行选择。
 
 ### 12. Feedback + Evaluation Loop
 
 `sql_agent/feedback/` 支持用户对 SQL 和答案进行反馈。如果反馈中包含 `corrected_sql`，系统会自动沉淀为 verified query，并在后续相似问题中召回，作为候选 SQL 的高可信来源。
+
+Feedback 2.0 增强了结构化学习信号：
+
+- 错误原因枚举：错表、错列、错过滤、错 Join、错聚合、指标定义错误、答案不 grounded、图表错误。
+- verified query 生命周期：`PENDING_REVIEW`、`VERIFIED`、`DEPRECATED`、`REJECTED`。
+- 质量信号写入 verified query，CandidateRanker 可据此识别 verified 来源并加分。
+- 对指标定义错误的反馈生成语义模型更新建议，例如建议给指标增加默认过滤条件；系统只产出建议，不自动修改语义模型。
 
 新增 API：
 
@@ -349,7 +360,7 @@ services/          # Dataherald 原始多服务参考实现或源码镜像
 - `GET /api/v1/feedback`
 - `GET /api/v1/verified-queries`
 
-`sql_agent/eval/harness.py` 提供离线评估框架，支持从 case YAML 中衡量 SQL 可执行率、执行结果准确率、答案 grounded 率、Semantic plan 命中率和 verified query 命中率。
+`sql_agent/eval/harness.py` 提供离线评估框架，支持从 case YAML 中衡量 SQL 可执行率、执行结果准确率、答案 grounded 率、Semantic plan 命中率和 verified query 命中率。Evaluation Benchmark 2.0 进一步支持 tag-level metrics、`SEMANTIC_MISS` / `SQL_INVALID` / `EXECUTION_MISMATCH` / `UNGROUNDED_ANSWER` / `MISSING_EVIDENCE` / `WRONG_VISUALIZATION` 错误归因，以及 `sql_agent/eval/run_api_cases.py` 批量调用 `/api/v1/question` 并生成 `docs/eval-reports/<timestamp>.md`。
 
 ### 13. Visualization Spec
 
@@ -359,8 +370,9 @@ services/          # Dataherald 原始多服务参考实现或源码镜像
 - 分类字段 + 数值字段：`bar`
 - 时间字段 + 数值字段：`line`
 - 其他明细：`table`
+- 占比或份额问题：`pie`
 
-这让 API 返回从“答案 + SQL”进一步扩展为“答案 + 证据 + 可展示洞察”。
+每个推荐会同时返回轻量 spec 和可直接消费的 ECharts option，并做字段校验：x/y 字段必须存在，y 必须是数值，趋势图 x 必须是时间字段。推荐结果还会标记是否支持当前 key finding，让前端可以把文字洞察和图表资产绑定展示。
 
 ## API 端点
 
@@ -418,8 +430,9 @@ pytest -q tests
 - 启发式 ResultAnalyzer 和严格 grounded 的 LLMResultAnalyzer。
 - Semantic Layer、SemanticQueryPlan、语义 SQL 编译。
 - FeedbackService、verified query 沉淀和召回。
-- VisualizationRecommender 图表推荐。
+- VisualizationRecommender 图表推荐、ECharts option 和字段校验。
 - Evaluation Harness 离线指标评估。
+- API benchmark runner 和 Markdown 评估报告生成。
 - Agent 基类、复杂度判断和工具函数。
 - SQL 注入拦截。
 - 工具层 schema 白名单校验。
@@ -431,7 +444,7 @@ pytest -q tests
 当前本地测试结果：
 
 ```text
-104 passed, 3 skipped, 2 warnings
+119 passed, 3 skipped, 2 warnings
 ```
 
 其中 3 个 skipped 是真实 OpenAI、MongoDB、ChromaDB 集成测试，默认需要设置 `RUN_REAL_INTEGRATIONS=true` 才运行。2 个 warnings 分别来自当前 FastAPI TestClient/httpx 组合的弃用提示，以及当前工作区 `.pytest_cache` 写入权限提示。
@@ -454,8 +467,8 @@ pytest -q
 2. `SqlDbQuery` 复杂多表查询目前主要校验表名，列级白名单对 alias、聚合表达式、复杂子查询仍采取保守策略，后续可引入更稳定的 SQL AST 解析。
 3. 候选 SQL 当前主要来自 Agent 主输出和中间步骤，后续可以扩展为多策略主动生成候选。
 4. `LLMResultAnalyzer` 当前主要校验 evidence 和数值事实可追溯性，复杂自然语言因果解释仍应保持在 limitations 中，不能当成数据库外的事实判断。
-5. Semantic planner 当前是启发式匹配，SQL compiler 主要支持单指标、简单维度、默认过滤和 Top-K，不是完整语义 SQL 编译器。
-6. Verified query 召回使用轻量 token overlap，后续可以接 VectorBackend 做语义召回。
+5. Semantic planner 当前是启发式匹配，SQL compiler 支持多指标、简单维度、默认过滤、Top-K、时间粒度和一跳关系 Join，但还不是完整语义 SQL 编译器。
+6. Verified query 召回使用轻量 token overlap，后续可以接 VectorBackend 做语义召回；生命周期目前是数据结构和 API 层能力，还没有人工审核 UI。
 7. MongoDB 会话存储目前按普通 dict/datetime 写入，后续如果引入更复杂对象，需要统一序列化策略。
 8. 真实 OpenAI、MongoDB、ChromaDB 集成测试已经补充，但默认跳过，需要在具备凭据和外部服务的环境中通过 `RUN_REAL_INTEGRATIONS=true` 显式执行。
 9. 全仓库测试仍受 `services/engine` 原始 Dataherald 子项目依赖影响，需要单独安装该子项目依赖，或配置 pytest 默认只收集根目录重构版测试。
@@ -503,10 +516,10 @@ pytest -q
    - 关键发现必须带 SQL result evidence，异常或不可信输出自动回退。
 
 7. **Semantic Layer + Feedback + Evaluation**
-   - 指标、维度、同义词和默认过滤条件通过 YAML 语义模型显式定义。
-   - 用户问题先解析为 `SemanticQueryPlan`，SQL 是可校验计划的编译结果。
-   - 用户反馈可沉淀为 verified query，后续相似问题优先复用。
-   - Evaluation Harness 衡量 valid rate、execution accuracy、answer grounding rate 和 semantic plan accuracy。
+   - 指标、维度、同义词、默认过滤条件、指标 owner/version/certified、时间粒度和简单关系通过 YAML 语义模型显式定义。
+   - 用户问题先解析为 `SemanticQueryPlan`，SQL 是可校验计划的编译结果；多指标和歧义场景可以结构化表达。
+   - 用户反馈可沉淀为带生命周期和质量信号的 verified query，后续相似问题优先复用并进入 CandidateRanker 加分。
+   - Evaluation Benchmark 衡量 valid rate、execution accuracy、answer grounding rate、semantic plan accuracy、tag metrics 和错误归因。
 
 更稳妥的项目表述：
 
@@ -556,8 +569,14 @@ pytest -q
 - [x] 增加 Evaluation Harness，衡量 valid/execution/grounding/semantic plan 指标。
 - [x] 增加 VisualizationRecommender，返回 metric card、bar、line、table spec。
 - [x] 为 SchemaScanner 增加列级语义类型、同义词和统计信息。
+- [x] Semantic Layer 2.0：支持指标治理字段、多指标、时间粒度、简单关系 Join 和歧义澄清。
+- [x] Feedback 2.0：支持结构化错误原因、verified query 生命周期、质量信号和语义模型更新建议。
+- [x] CandidateRanker 2.0：支持评分拆解、候选来源、选择理由、结果形状校验、verified query bonus 和 semantic plan match bonus。
+- [x] ResultAnalyzer 2.0：支持发现类型、Top K、比较、占比和 why 类问题限制说明。
+- [x] Visualization 2.0：支持 ECharts option、字段校验、finding 适配和占比场景 pie chart。
+- [x] Evaluation Benchmark 2.0：支持 API case runner、demo SQLite、tag metrics、错误归因和 Markdown 报告输出。
 - [ ] 扩展多策略候选 SQL 主动生成。
-- [ ] 增加图表推荐和可视化 spec 输出，让结果分析进一步从文本答案扩展到可展示洞察。
+- [x] 增加图表推荐和可视化 spec 输出，让结果分析进一步从文本答案扩展到可展示洞察。
 - [ ] 强化复杂多表 SQL 的 alias、表达式和子查询列级白名单校验。
 - [ ] 统一 MongoDB 会话和复杂对象的序列化策略。
 - [ ] 接入 Langfuse / LangSmith 做 Agent 推理链路追踪。
@@ -572,6 +591,6 @@ pytest -q
 - **Schema 优先**：先理解数据库结构，再让 LLM 生成 SQL。
 - **执行闭环**：生成 SQL 后通过数据库执行反馈进行修正。
 - **答案可追溯**：最终自然语言答案只能来自系统执行 SQL 得到的受控结果，SQL 和 evidence 保留为审计依据。
-- **业务语义显式化**：指标、维度和默认过滤条件进入 Semantic Layer，SQL 是可校验计划的编译结果。
+- **业务语义显式化**：指标、维度、默认过滤条件、指标治理信息、时间粒度和简单关系进入 Semantic Layer，SQL 是可校验计划的编译结果。
 - **反馈可沉淀**：用户修正可以进入 verified query，参与后续候选召回和排序。
 - **如实演进**：保持原型边界清晰，优先打通核心链路，再补生产级能力。

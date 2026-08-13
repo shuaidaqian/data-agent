@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-from typing import Any, List
+from typing import Any, List, Optional
 
-from sql_agent.analysis.types import QueryResultPayload
-from sql_agent.visualization.types import VisualizationRecommendation
+from sql_agent.analysis.types import KeyFinding, QueryResultPayload
+from sql_agent.visualization.types import ChartValidation, VisualizationRecommendation
 
 
 class VisualizationRecommender:
@@ -15,6 +15,7 @@ class VisualizationRecommender:
         self,
         question: str,
         result: QueryResultPayload,
+        findings: Optional[List[KeyFinding]] = None,
     ) -> VisualizationRecommendation:
         if len(result.columns) == 1 and len(result.rows) == 1:
             return self._metric_card(question, result)
@@ -28,10 +29,34 @@ class VisualizationRecommender:
         ]
 
         if time_columns and numeric_columns:
-            return self._line(question, time_columns[0], numeric_columns[-1])
+            return self._line(question, result, time_columns[0], numeric_columns[-1])
         if categorical_columns and numeric_columns:
-            return self._bar(question, categorical_columns[0], numeric_columns[-1])
+            if self._asks_for_share(question, findings):
+                return self._pie(
+                    question, result, categorical_columns[0], numeric_columns[-1], findings
+                )
+            return self._bar(question, result, categorical_columns[0], numeric_columns[-1])
         return self._table(question, result.columns)
+
+    def validate_chart(
+        self,
+        chart_type: str,
+        result: QueryResultPayload,
+        x_field: Optional[str] = None,
+        y_field: Optional[str] = None,
+    ) -> ChartValidation:
+        errors = []
+        if x_field and x_field not in result.columns:
+            errors.append(f"x 字段 `{x_field}` 不存在。")
+        if y_field and y_field not in result.columns:
+            errors.append(f"y 字段 `{y_field}` 不存在。")
+        if y_field and y_field in result.columns:
+            values = [row.get(y_field) for row in result.rows if row.get(y_field) is not None]
+            if not values or not all(self._is_number(value) for value in values):
+                errors.append(f"y 字段 `{y_field}` 必须是数值。")
+        if chart_type == "line" and x_field and not self._is_time_like_field(x_field):
+            errors.append("折线趋势图的 x 字段需要是时间字段。")
+        return ChartValidation(valid=not errors, errors=errors)
 
     def _metric_card(
         self,
@@ -44,9 +69,23 @@ class VisualizationRecommender:
             title=question,
             rationale="单行单列结果适合用指标卡展示。",
             spec={"value": {"field": field}, "label": field},
+            echarts_option={
+                "title": {"text": question},
+                "series": [
+                    {"type": "gauge", "data": [{"name": field, "value": result.rows[0].get(field)}]}
+                ],
+            },
+            validation=ChartValidation(valid=True),
         )
 
-    def _bar(self, question: str, x_field: str, y_field: str) -> VisualizationRecommendation:
+    def _bar(
+        self,
+        question: str,
+        result: QueryResultPayload,
+        x_field: str,
+        y_field: str,
+    ) -> VisualizationRecommendation:
+        validation = self.validate_chart("bar", result, x_field=x_field, y_field=y_field)
         return VisualizationRecommendation(
             chart_type="bar",
             title=question,
@@ -58,9 +97,30 @@ class VisualizationRecommender:
                     "y": {"field": y_field, "type": "quantitative"},
                 },
             },
+            echarts_option={
+                "title": {"text": question},
+                "tooltip": {"trigger": "axis"},
+                "xAxis": {"type": "category", "data": [row.get(x_field) for row in result.rows]},
+                "yAxis": {"type": "value"},
+                "series": [
+                    {
+                        "name": y_field,
+                        "type": "bar",
+                        "data": [row.get(y_field) for row in result.rows],
+                    }
+                ],
+            },
+            validation=validation,
         )
 
-    def _line(self, question: str, x_field: str, y_field: str) -> VisualizationRecommendation:
+    def _line(
+        self,
+        question: str,
+        result: QueryResultPayload,
+        x_field: str,
+        y_field: str,
+    ) -> VisualizationRecommendation:
+        validation = self.validate_chart("line", result, x_field=x_field, y_field=y_field)
         return VisualizationRecommendation(
             chart_type="line",
             title=question,
@@ -72,6 +132,20 @@ class VisualizationRecommender:
                     "y": {"field": y_field, "type": "quantitative"},
                 },
             },
+            echarts_option={
+                "title": {"text": question},
+                "tooltip": {"trigger": "axis"},
+                "xAxis": {"type": "category", "data": [row.get(x_field) for row in result.rows]},
+                "yAxis": {"type": "value"},
+                "series": [
+                    {
+                        "name": y_field,
+                        "type": "line",
+                        "data": [row.get(y_field) for row in result.rows],
+                    }
+                ],
+            },
+            validation=validation,
         )
 
     def _table(self, question: str, columns: List[str]) -> VisualizationRecommendation:
@@ -80,6 +154,46 @@ class VisualizationRecommender:
             title=question,
             rationale="当前结果更适合保留为明细表。",
             spec={"columns": columns},
+            echarts_option={},
+            validation=ChartValidation(valid=True),
+        )
+
+    def _pie(
+        self,
+        question: str,
+        result: QueryResultPayload,
+        x_field: str,
+        y_field: str,
+        findings: Optional[List[KeyFinding]],
+    ) -> VisualizationRecommendation:
+        validation = self.validate_chart("pie", result, x_field=x_field, y_field=y_field)
+        return VisualizationRecommendation(
+            chart_type="pie",
+            title=question,
+            rationale="占比或份额问题适合用饼图展示组成结构。",
+            spec={
+                "type": "pie",
+                "encoding": {
+                    "category": {"field": x_field, "type": "nominal"},
+                    "value": {"field": y_field, "type": "quantitative"},
+                },
+            },
+            echarts_option={
+                "title": {"text": question},
+                "tooltip": {"trigger": "item"},
+                "series": [
+                    {
+                        "name": y_field,
+                        "type": "pie",
+                        "data": [
+                            {"name": row.get(x_field), "value": row.get(y_field)}
+                            for row in result.rows
+                        ],
+                    }
+                ],
+            },
+            validation=validation,
+            supports_finding=bool(findings),
         )
 
     def _numeric_columns(self, result: QueryResultPayload) -> List[str]:
@@ -95,11 +209,20 @@ class VisualizationRecommender:
         ]
 
     def _time_columns(self, result: QueryResultPayload) -> List[str]:
-        return [
-            column
-            for column in result.columns
-            if any(token in column.lower() for token in ["date", "time", "day", "month", "year"])
-        ]
+        return [column for column in result.columns if self._is_time_like_field(column)]
 
     def _is_number(self, value: Any) -> bool:
         return isinstance(value, (int, float)) and not isinstance(value, bool)
+
+    def _is_time_like_field(self, column: str) -> bool:
+        return any(token in column.lower() for token in ["date", "time", "day", "month", "year"])
+
+    def _asks_for_share(
+        self,
+        question: str,
+        findings: Optional[List[KeyFinding]],
+    ) -> bool:
+        text = question.lower()
+        if any(token in text for token in ["占比", "比例", "份额", "share", "proportion"]):
+            return True
+        return any("占" in finding.claim or "%" in finding.claim for finding in findings or [])
