@@ -1,5 +1,7 @@
 # 2026-08-13 00:05:02 Semantic Layer / Feedback / Evaluation / Visualization 迭代记录
 
+> 历史记录说明：本文记录的是 Semantic Layer / Feedback / Evaluation / Visualization 1.0 当次迭代状态，测试数量和边界说明保留当时事实。当前项目已经在 2026-08-13 晚间迭代升级到 Data Agent 2.0，详见 `docs/iterations/2026-08-13-230519-data-agent-2-0-deepening.md`。
+
 ## 本轮目标
 
 本轮目标是把项目从“可执行的 NL-to-SQL Agent 原型”继续升级为“基于语义层、执行证据、反馈学习和评估闭环的企业数据问答 Agent 原型”。

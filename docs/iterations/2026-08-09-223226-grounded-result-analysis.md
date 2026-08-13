@@ -1,5 +1,7 @@
 # 2026-08-09 22:32:26 Grounded Result Analysis 迭代记录
 
+> 历史记录说明：本文记录的是 2026-08-09 当次迭代状态，测试数量和后续计划保留当时事实。当前项目已经在 2026-08-13 迭代升级到 Data Agent 2.0，详见 `docs/iterations/2026-08-13-230519-data-agent-2-0-deepening.md`。
+
 ## 本轮目标
 
 本轮目标是把 `/api/v1/question` 从“返回一条 SQL”推进到“返回可追溯的数据答案”：

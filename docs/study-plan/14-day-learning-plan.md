@@ -27,7 +27,7 @@ rg -n "^class |^def |^async def " sql_agent tests main.py
 - `services/` 是 Dataherald 原始多服务参考实现或源码镜像。
 - `sql_agent/` 是当前重构出来的核心 NL->SQL Agent 引擎。
 - 本项目不是完整生产平台，而是核心 Agent 引擎重构原型。
-- 四个核心增强点：原生 Agent、多轮对话、Schema Linking、自纠错。
+- 当前核心增强点：Semantic Layer 业务语义治理、原生 Agent、多轮对话、Schema Linking、自纠错、候选 SQL 可解释排序、grounded 结果洞察、ECharts 可视化资产和 Evaluation Benchmark。
 
 **当日产出：**
 
@@ -617,14 +617,18 @@ pytest -q tests/test_conversation.py tests/test_api_e2e.py
 - `sql_agent/correction/din_style.py`
 - `sql_agent/correction/dail_style.py`
 - `sql_agent/eval/evaluator.py`
+- `sql_agent/eval/harness.py`
+- `sql_agent/eval/run_api_cases.py`
 - `tests/test_correction.py`
 - `tests/test_evaluator.py`
+- `tests/test_eval_harness.py`
+- `tests/test_eval_benchmark_2.py`
 - `tests/test_real_integrations.py`
 
 **命令：**
 
 ```bash
-pytest -q tests/test_correction.py tests/test_evaluator.py tests/test_real_integrations.py
+pytest -q tests/test_correction.py tests/test_evaluator.py tests/test_eval_harness.py tests/test_eval_benchmark_2.py tests/test_real_integrations.py
 ```
 
 **必须理解：**
@@ -633,6 +637,8 @@ pytest -q tests/test_correction.py tests/test_evaluator.py tests/test_real_integ
 - DIN-SQL 风格是 verify-then-fix。
 - DAIL-SQL 风格是 execute-feedback-fix。
 - SQL 可执行不等于语义正确。
+- Evaluation Benchmark 2.0 如何输出 tag metrics 和 error breakdown。
+- API case runner 如何批量调用 `/api/v1/question` 并生成 Markdown 报告。
 - 真实 OpenAI、MongoDB、ChromaDB 集成测试为什么可能 skip。
 
 **当日产出：**
@@ -662,87 +668,101 @@ pytest -q tests/test_correction.py tests/test_evaluator.py tests/test_real_integ
 - SQL 修正前后如何保留审计信息？
 - `SimpleEvaluator.evaluate()` 的启发式规则有哪些？
 - LLM evaluator 为什么可能不稳定？
+- `EvaluationHarness` 如何计算 valid rate、execution accuracy、grounding rate？
+- `error_breakdown` 如何帮助定位回归？
+- API benchmark runner 为什么要和模块级 harness 分开？
 - 真实集成测试依赖哪些环境变量或外部服务？
 - skip 真实集成测试是好事还是坏事？如何解释？
 - 面试官问“如何评估 NL->SQL 准确率”，你会提出哪些指标？
 
-## Day 13：端到端链路复盘和项目风险
+## Day 13：Semantic / Ranking / Analysis / Visualization 2.0
 
-**目标：** 把所有模块串成完整系统，并准备回答项目不足。
+**目标：** 吃透项目当前最能体现“从 demo 到系统”的 2.0 能力。
+
+**阅读：**
+
+- `sql_agent/semantic/types.py`
+- `sql_agent/semantic/planner.py`
+- `sql_agent/semantic/compiler.py`
+- `sql_agent/ranking/ranker.py`
+- `sql_agent/analysis/result_analyzer.py`
+- `sql_agent/visualization/recommender.py`
+- `tests/test_semantic_layer_2.py`
+- `tests/test_candidate_ranking_2.py`
+- `tests/test_result_analysis_2.py`
+- `tests/test_visualization_2.py`
+
+**命令：**
+
+```bash
+pytest -q tests/test_semantic_layer_2.py tests/test_candidate_ranking_2.py tests/test_result_analysis_2.py tests/test_visualization_2.py
+```
+
+**必须理解：**
+
+- Semantic Layer 2.0 如何表达指标治理、时间粒度、多指标、Join 和歧义澄清。
+- CandidateRanker 2.0 如何输出 `score_breakdown`、`selection_reason`、`source` 和 `result_shape`。
+- ResultAnalyzer 2.0 如何生成 Top K、占比、比较和 why limitation。
+- Visualization 2.0 如何输出 ECharts option，并做字段校验。
+
+**当日产出：**
+
+- 画“SemanticQueryPlan -> CandidateRanker -> ResultAnalyzer -> Visualization”链路图。
+- 写一段 3 分钟口述稿：为什么这个项目不是简单 Text-to-SQL demo。
+
+**自测问题：**
+
+- 为什么指标要有 owner、version 和 certified？
+- 为什么 SQL 应该是 SemanticQueryPlan 的编译产物？
+- 多指标查询和歧义查询分别如何表达？
+- relationship Join 编译目前支持到什么程度？
+- 为什么 CandidateRanker 要校验结果形状？
+- count、group-by、trend 三类问题的结果形状分别是什么？
+- verified query bonus 是否意味着可以跳过执行？为什么不能？
+- `score_breakdown` 和 `selection_reason` 面试时怎么讲？
+- ResultAnalyzer 为什么要区分 finding type？
+- 为什么 why 类问题不能直接给原因？
+- 占比 finding 的 evidence 如何写才 grounded？
+- ECharts option 和轻量 spec 各有什么价值？
+- line chart 为什么要求 x 是时间字段？
+- pie chart 为什么只用于占比或份额场景？
+- 这些 2.0 能力如何帮助项目从 demo 变系统？
+
+## Day 14：端到端复盘、模拟面试和最终答辩材料
+
+**目标：** 把所有模块串成完整系统，并形成可直接用于秋招面试的表达材料。
 
 **阅读：**
 
 - `tests/test_api_e2e.py`
 - `tests/fakes.py`
 - `sql_agent/api/routes.py`
+- `docs/project-highlights.md`
+- `docs/interview-prep-sql-agent.md`
+- `docs/iterations/2026-08-13-230519-data-agent-2-0-deepening.md`
 
 **命令：**
 
 ```bash
 pytest -q tests/test_api_e2e.py tests/test_ioc_registry.py
-```
-
-**必须理解：**
-
-- 端到端测试为什么用 MockLLM。
-- fake storage、fake vector store 如何替代真实服务。
-- `/api/v1/question` 如何完整串起数据库、schema、context、agent、correction。
-- 项目风险：SQL 安全、LLM 幻觉、schema 过大、复杂查询失败、真实集成不稳定。
-
-**当日产出：**
-
-- 写“项目缺陷与改进方向清单”。
-- 画“测试金字塔”。
-
-**自测问题：**
-
-- 如果数据库有 1000 张表，当前方案会遇到什么问题？
-- 如果 LLM 生成危险 SQL，系统有哪些防线？
-- 如果 schema linking 找不到 JOIN 路径怎么办？
-- `tests/fakes.py` 中 fake storage 模拟了哪些真实能力？
-- fake vector store 和真实 ChromaDB 的区别是什么？
-- MockLLM 如何让端到端测试稳定？
-- API E2E 测试如何证明 stored connection 被使用？
-- API E2E 测试如何证明 conversation history 被保留？
-- 为什么端到端测试不应该依赖真实 OpenAI 输出？
-- 如果真实 MongoDB 挂了，系统会在哪一层失败？
-- 如果 ChromaDB 检索失败，是否还能生成 SQL？
-- 如果 SchemaScanner 扫描失败，是否还能生成 SQL？
-- 如果 Agent 生成空 SQL，API 应该如何响应？
-- 如果 correction 把正确 SQL 改错了，如何发现？
-- 如何给 Agent 每一步加日志和 trace？
-- Langfuse/LangSmith 这类工具可以观测什么？
-- 线上延迟可能来自哪些步骤？
-- 如何缓存 schema、embedding、few-shot 检索结果？
-- 如何设计 SQL 执行超时和最大返回行数？
-- 如何做多租户隔离？
-- 如何保护数据库连接串和 API key？
-- 项目当前最大的三个生产风险是什么？
-- 面试官问“你这个项目哪里最薄弱”，你如何诚实回答？
-
-## Day 14：模拟面试和最终答辩材料
-
-**目标：** 形成可直接用于秋招面试的表达材料。
-
-**命令：**
-
-```bash
 pytest -q tests
 ```
 
 **必须完成：**
 
+- 写“项目缺陷与改进方向清单”。
+- 画“测试金字塔”。
 - 5 分钟项目介绍稿。
 - 15 分钟深挖版讲解提纲。
 - 20 个面试追问与答案。
 - 核心技术细节速查表。
 - 项目不足与改进路线。
-- 最终测试结果记录。
+- 最终测试结果记录：`119 passed, 3 skipped, 2 warnings`。
 
 **验收标准：**
 
 - 能在 5 分钟内讲清项目背景、架构、亮点、难点和不足。
-- 能白板画主链路、ReAct 循环、Schema Linking、自纠错闭环。
+- 能白板画主链路、ReAct 循环、Schema Linking、自纠错闭环、SemanticQueryPlan、CandidateRanker、ResultAnalyzer grounding 和 Evaluation Benchmark。
 - 能回答至少 80% 高频追问，不依赖 README。
 
 **自测问题：**
@@ -760,7 +780,7 @@ pytest -q tests
 - 如果面试官让你现场画架构图，你先画哪些模块？
 - 如果面试官让你现场写一个 SQL 示例，你选哪个业务场景？
 - 如果面试官让你解释测试，如何从单元测试讲到端到端测试？
-- 如果面试官问“81 passed, 3 skipped 说明什么”，你怎么解释？
+- 如果面试官问“119 passed, 3 skipped, 2 warnings 说明什么”，你怎么解释？
 - 如果面试官问 skipped 是否代表测试不完整，你如何回答？
 - 如果面试官让你设计生产部署，你会补哪些组件？
 - 如果面试官问“如何做权限控制”，你怎么回答？
@@ -801,5 +821,8 @@ Day 11:
 pytest -q tests/test_conversation.py tests/test_api_e2e.py
 
 Day 12:
-pytest -q tests/test_correction.py tests/test_evaluator.py tests/test_real_integrations.py
+pytest -q tests/test_correction.py tests/test_evaluator.py tests/test_eval_harness.py tests/test_eval_benchmark_2.py tests/test_real_integrations.py
+
+Day 13:
+pytest -q tests/test_semantic_layer_2.py tests/test_candidate_ranking_2.py tests/test_result_analysis_2.py tests/test_visualization_2.py
 ```

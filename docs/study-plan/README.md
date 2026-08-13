@@ -2,10 +2,11 @@
 
 这个目录用于把“两周吃透 SQL Agent 项目学习计划”落地成可执行资料。目标不是泛泛读代码，而是围绕面试深挖建立四类能力：
 
-- 能画清楚系统链路：用户问题如何经过 API、Context、Schema、Agent、Tools、Correction 最终变成 SQL。
+- 能画清楚系统链路：用户问题如何经过 API、Semantic Layer、Context、Schema、Agent、Tools、Correction、CandidateRanker、ResultAnalyzer 和 Visualization 最终变成可追溯数据答案。
 - 能讲清楚技术选型：FastAPI、Pydantic、SQLAlchemy、OpenAI SDK、MongoDB、ChromaDB、pytest 分别解决什么问题。
 - 能解释源码细节：核心类、核心函数、数据流、错误处理、测试策略。
 - 能经受追问：能坦诚说明项目边界、风险、改进方向，而不是只背 README。
+- 能解释 2.0 深化能力：Semantic Layer 业务语义治理、verified query 学习、候选 SQL 可解释排序、grounded 洞察、ECharts 可视化资产和 Evaluation Benchmark。
 
 ## 使用方式
 
@@ -44,6 +45,16 @@ docs/study-plan/
 
 - 5 分钟讲清项目背景、架构、亮点、难点和不足。
 - 白板画出主链路、ReAct 循环、Schema Linking、自纠错闭环。
+- 白板画出 SemanticQueryPlan、CandidateRanker 决策、ResultAnalyzer grounding、Visualization asset 和 Evaluation Benchmark 闭环。
 - 解释 `sql_agent` 每个核心包的职责。
 - 回答至少 20 个围绕项目的深入追问。
 - 说清楚测试体系为什么可信、哪里还不够。
+
+当前项目基线：
+
+```text
+pytest -q tests
+119 passed, 3 skipped, 2 warnings
+```
+
+3 个 skipped 是真实 OpenAI、MongoDB、ChromaDB 集成测试，默认需要显式配置真实环境才运行。

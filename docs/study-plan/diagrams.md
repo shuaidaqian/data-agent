@@ -1,6 +1,6 @@
 # SQL Agent 核心图谱
 
-## 1. NL->SQL 主链路
+## 1. NL->Data Answer 主链路
 
 ```mermaid
 flowchart TD
@@ -10,9 +10,12 @@ flowchart TD
     D --> E["加载 DatabaseConnection"]
     E --> F["SQLDatabase"]
     F --> G["SchemaScanner 扫描表结构"]
+    D --> S["SemanticPlanner 生成 SemanticQueryPlan"]
+    S --> S1["SemanticSQLCompiler 编译 semantic SQL"]
     D --> H["ContextRetriever 检索上下文"]
     H --> H1["Golden SQL few-shot"]
     H --> H2["管理员指令"]
+    D --> V["FeedbackService 召回 verified query"]
     G --> I["AgentSelector 判断复杂度"]
     H1 --> I
     H2 --> I
@@ -22,7 +25,13 @@ flowchart TD
     K --> L
     L --> M["生成 SQL"]
     M --> N["DAIL / DIN 自纠错"]
-    N --> O["SQLResponse"]
+    S1 --> R["CandidateRanker"]
+    V --> R
+    N --> R
+    R --> R1["执行验证 + 评分拆解 + 结果形状校验"]
+    R1 --> A1["ResultAnalyzer grounded 洞察"]
+    A1 --> Z["VisualizationRecommender ECharts option"]
+    Z --> O["SQLResponse: answer + sql + result + analysis + visualization + candidates"]
 ```
 
 ## 2. ReAct 循环
@@ -87,7 +96,88 @@ flowchart TD
     C --> D["单元测试 数据模型/工具/纠错/评估"]
 ```
 
-## 7. IoC 组件实例化
+## 7. SemanticQueryPlan 编译链路
+
+```mermaid
+flowchart TD
+    A["自然语言问题"] --> B["Metric / Dimension 同义词匹配"]
+    B --> C{"多个指标歧义?"}
+    C -->|是| D["NEEDS_CLARIFICATION + clarification_options"]
+    C -->|否| E["SemanticQueryPlan"]
+    E --> F["metrics / dimensions / filters / time_grain / limit"]
+    F --> G["SemanticPlanValidator"]
+    G --> H["SemanticSQLCompiler"]
+    H --> I["SQL 候选"]
+```
+
+## 8. CandidateRanker 可解释决策
+
+```mermaid
+flowchart TD
+    A["候选 SQL 集合"] --> B["去重"]
+    B --> C["schema 白名单校验"]
+    C --> D["真实执行 SQL"]
+    D --> E["收集 row_count / columns / preview / error"]
+    E --> F["结果形状校验"]
+    F --> G["评分拆解 score_breakdown"]
+    G --> H["verified bonus / semantic plan match bonus"]
+    H --> I["selection_reason"]
+    I --> J["排序后的 candidates"]
+```
+
+## 9. Grounded Result Analysis
+
+```mermaid
+flowchart TD
+    A["最优 SQLCandidate.execution"] --> B["QueryResultPayload"]
+    B --> C{"结果形状"}
+    C -->|单行单列| D["single_metric finding"]
+    C -->|多行数值| E["Top K / max-min / share finding"]
+    C -->|空结果| F["empty result limitation"]
+    D --> G["answer / summary / key_findings"]
+    E --> G
+    F --> G
+    G --> H["每个 finding 绑定 SQL result evidence"]
+    H --> I["why 问题追加因果限制"]
+```
+
+## 10. Visualization 2.0
+
+```mermaid
+flowchart TD
+    A["QueryResultPayload + key_findings"] --> B{"结果结构"}
+    B -->|单行单列| C["metric_card"]
+    B -->|分类 + 数值| D["bar"]
+    B -->|时间 + 数值| E["line"]
+    B -->|占比/份额| F["pie"]
+    B -->|其他| G["table"]
+    C --> H["ECharts option"]
+    D --> H
+    E --> H
+    F --> H
+    G --> H
+    H --> I["ChartValidation: x/y 存在、y 数值、时间字段校验"]
+```
+
+## 11. Feedback + Evaluation Loop
+
+```mermaid
+flowchart TD
+    A["用户反馈"] --> B["WrongReason enum"]
+    B --> C["corrected_sql?"]
+    C -->|是| D["VerifiedQuery PENDING_REVIEW"]
+    D --> E["quality_signals"]
+    E --> F["后续问题召回 verified query"]
+    F --> G["CandidateRanker 加分但仍执行验证"]
+    A --> H["semantic update suggestion"]
+    I["Benchmark cases"] --> J["API case runner / harness"]
+    J --> K["tag_metrics"]
+    J --> L["error_breakdown"]
+    K --> M["迭代质量复盘"]
+    L --> M
+```
+
+## 12. IoC 组件实例化
 
 ```mermaid
 flowchart TD

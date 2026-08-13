@@ -2,7 +2,7 @@
 
 ## 一句话定位
 
-这是一个参考 Dataherald 架构并结合 Data Agent 思路重构的轻量级企业数据问答 Agent 系统。它不是简单让 LLM 一次性生成 SQL，而是把 Semantic Layer、SemanticQueryPlan、数据库环境感知、工具调用、Schema Linking、多轮记忆、执行反馈自纠错、候选 SQL 证据化排序、grounded 结果分析、反馈学习和离线评估串成一个可测试的工程闭环。
+这是一个参考 Dataherald 架构并结合 Data Agent 思路重构的轻量级企业数据问答 Agent 系统。它不是简单让 LLM 一次性生成 SQL，而是把 Semantic Layer 2.0、SemanticQueryPlan、数据库环境感知、工具调用、Schema Linking、多轮记忆、执行反馈自纠错、候选 SQL 可解释排序、grounded 结果洞察、ECharts 可视化资产、反馈学习和 Evaluation Benchmark 串成一个可测试的工程闭环。
 
 ## 面试官容易眼前一亮的亮点
 
@@ -115,7 +115,7 @@
 
 > 我后来发现 NL-to-SQL 的核心难点不是 SQL 语法，而是业务语义和指标口径。所以我加了一层轻量 Semantic Layer，把“员工数量”这类业务指标、同义词、维度、时间粒度、默认过滤条件和认证状态显式建模。用户问题会先解析成 SemanticQueryPlan，再编译为 SQL；多指标和歧义场景也能结构化表达，这样查询逻辑可以被审查，而不是完全依赖 LLM 猜。
 
-### 8. 多候选 SQL 证据化排序
+### 8. 多候选 SQL 可解释排序
 
 这是结果可靠性链路里的关键增强，和 Semantic Layer、verified query 一起构成候选决策层。
 
@@ -134,7 +134,7 @@
 
 面试表达：
 
-> 系统不会盲信第一条 SQL，而是对候选 SQL 做执行验证和证据化排序。最终返回的不只是 SQL，还有候选分数、执行行数、结果列和选择依据，后续自然语言答案也只基于这份受控执行结果生成。
+> 系统不会盲信第一条 SQL，而是对候选 SQL 做执行验证、结果形状校验和可解释排序。最终返回的不只是 SQL，还有候选分数、评分拆解、执行行数、结果列和选择依据，后续自然语言答案也只基于这份受控执行结果生成。
 
 ### 9. Grounded 结果分析，不止返回 SQL
 
@@ -203,8 +203,8 @@
 - ResultAnalyzer grounded 输出和 LLM 回退保护。
 - Semantic Layer 和 SemanticQueryPlan。
 - FeedbackService 和 verified query。
-- VisualizationRecommender。
-- Evaluation Harness。
+- VisualizationRecommender 与 ECharts option。
+- Evaluation Benchmark。
 - 自纠错。
 - Evaluator。
 - 真实 OpenAI/MongoDB/ChromaDB 集成测试骨架。

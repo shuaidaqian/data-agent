@@ -2,7 +2,7 @@
 
 ## 1. 项目一句话
 
-这是一个基于 Dataherald 架构分析后重构的轻量级 NL->SQL Agent 原型，重点验证原生 ReAct、Plan-and-Solve、多轮上下文、Schema Linking 和执行反馈自纠错。
+这是一个基于 Dataherald 架构分析后重构的轻量级 Data Agent / NL->SQL 原型，重点验证 Semantic Layer 业务语义治理、原生 ReAct、Plan-and-Solve、多轮上下文、Schema Linking、执行反馈自纠错、多候选 SQL 可解释排序、grounded 结果洞察、可消费 ECharts 可视化资产和反馈评估闭环。
 
 ## 2. 技术栈
 
@@ -28,12 +28,18 @@ POST /api/v1/question
   -> load DatabaseConnection
   -> SQLDatabase
   -> SchemaScanner.scan_all_tables()
+  -> SemanticPlanner 生成 SemanticQueryPlan
+  -> SemanticSQLCompiler 编译 semantic SQL 候选
   -> ContextRetriever.retrieve_all_context()
+  -> FeedbackService 召回 verified query
   -> ConversationManager.get_or_create()
   -> AgentSelector.generate_sql()
   -> ReActAgent 或 PlanSolveAgent
   -> AgentToolkit 工具调用
   -> DAILStyleCorrector.correct()
+  -> CandidateRanker 执行验证、形状校验、评分拆解
+  -> ResultAnalyzer 生成 answer / summary / key_findings
+  -> VisualizationRecommender 生成 spec / ECharts option
   -> SQLResponse
 ```
 
@@ -51,6 +57,9 @@ POST /api/v1/question
 | `GoldenSQL` | few-shot 示例 | prompt_text、sql、tables_used、complexity |
 | `Instruction` | 管理员规则 | 约束 SQL 风格和业务规则 |
 | `AgentConfig` | Agent 配置 | mode、max_iterations、self_correction |
+| `SemanticQueryPlan` | 语义查询中间表示 | metrics、dimensions、filters、time_grain、clarification_options |
+| `SQLCandidate` | 候选 SQL 决策对象 | score_breakdown、selection_reason、source、result_shape、execution |
+| `AnalysisResult` | 结果分析输出 | answer、summary、key_findings、limitations、visualization |
 
 ## 5. Agent 三件套
 
@@ -167,16 +176,109 @@ sales.product_id -> products.id
 | Schema 测试 | `tests/test_schema_linking.py`、`tests/test_schema_scanner_samples.py` | 验证 schema 理解能力 |
 | Agent 工具测试 | `tests/test_agent_tools.py` | 验证工具输入输出和白名单 |
 | API E2E 测试 | `tests/test_api_e2e.py` | 用 fake 组件测试完整 API 链路 |
+| Semantic 2.0 测试 | `tests/test_semantic_layer_2.py` | 验证指标治理、多指标、时间粒度、Join 和歧义澄清 |
+| Ranking 2.0 测试 | `tests/test_candidate_ranking_2.py` | 验证来源识别、评分拆解、选择理由和结果形状 |
+| Analysis 2.0 测试 | `tests/test_result_analysis_2.py` | 验证 Top K、占比、why 限制和 finding type |
+| Visualization 2.0 测试 | `tests/test_visualization_2.py` | 验证 ECharts option、字段校验和 pie |
+| Evaluation 2.0 测试 | `tests/test_eval_benchmark_2.py` | 验证 tag metrics、错误归因和 API case runner |
 | 真实集成测试 | `tests/test_real_integrations.py` | 有环境变量时测试真实 OpenAI/Mongo/Chroma |
 
 当前基线：
 
 ```text
 pytest -q tests
-81 passed, 3 skipped
+119 passed, 3 skipped, 2 warnings
 ```
 
-## 10. 项目风险和改进方向
+## 10. Semantic Layer 2.0
+
+核心思想：业务口径必须显式治理，不能让 LLM 从裸 schema 里猜。
+
+当前能力：
+
+- 指标治理：`version`、`owner`、`certified`。
+- 指标和维度同义词。
+- 默认过滤条件。
+- 时间维度和粒度：`day`、`month`、`quarter`、`year`。
+- 多指标查询。
+- 一跳 relationship Join 编译。
+- 歧义澄清：返回 `NEEDS_CLARIFICATION` 和候选指标。
+
+面试关键词：
+
+> SQL 是 SemanticQueryPlan 的编译产物，不是模型自由发挥的字符串。
+
+## 11. CandidateRanker 2.0
+
+核心思想：不相信第一条 SQL，真实执行后再排序。
+
+当前能力：
+
+- `source`：`semantic`、`verified`、`agent`。
+- `score_breakdown`：评分拆解。
+- `selection_reason`：选择理由。
+- `result_shape`：结果形状校验。
+- verified query bonus。
+- semantic plan match bonus。
+- count / group-by / trend 问题的形状校验。
+
+面试关键词：
+
+> 可执行不等于正确，结果形状也要符合问题意图。
+
+## 12. ResultAnalyzer 2.0
+
+核心思想：业务用户要答案和洞察，不只是 SQL。
+
+当前能力：
+
+- `FindingType`：single_metric、top_k、comparison、trend、distribution、empty_result、data_quality_warning。
+- Top 1 / Top K。
+- max / min / 差值。
+- 简单占比。
+- why 类问题返回 limitation，不把相关性包装成因果。
+- 每个关键发现必须绑定 `SQL result:` evidence。
+
+面试关键词：
+
+> 系统执行 SQL，LLM 只分析受控结果；不 grounded 就回退。
+
+## 13. Visualization 2.0
+
+核心思想：把结果从文本答案扩展成可消费分析资产。
+
+当前能力：
+
+- `metric_card`
+- `bar`
+- `line`
+- `table`
+- `pie`，仅用于占比和份额场景。
+- ECharts option。
+- 字段校验：x/y 存在、y 数值、line 的 x 是时间字段。
+- `supports_finding` 绑定文字洞察和图表。
+
+## 14. Feedback + Evaluation 2.0
+
+Feedback：
+
+- wrong reason enum。
+- verified query 生命周期。
+- quality signals。
+- semantic model update suggestion。
+
+Evaluation：
+
+- valid rate。
+- execution accuracy。
+- answer grounding rate。
+- semantic plan accuracy。
+- verified query hit rate。
+- tag metrics。
+- error breakdown。
+- API case runner 和 Markdown report。
+
+## 15. 项目风险和改进方向
 
 | 风险 | 说明 | 改进 |
 |------|------|------|
@@ -186,3 +288,7 @@ pytest -q tests
 | SQL 安全 | LLM 可能生成危险 SQL | 只读账号、白名单、AST 解析、审计日志 |
 | 执行反馈误导 | 0 行不一定错误 | 结合语义检查和样本统计 |
 | 真实服务不稳定 | OpenAI/Mongo/Chroma 依赖环境 | fake 测试 + 真实集成测试分层 |
+| 语义模型误维护 | 指标口径如果配置错，SQL 会稳定地错 | owner/certified、审核流、benchmark 回归 |
+| 候选排序误判 | 真实执行成功但语义仍可能错 | golden benchmark、verified query、LLM evaluator、人工反馈 |
+| 结果分析过度解释 | 相关性结果被说成因果 | finding type、why limitation、grounding 校验 |
+| 可视化误导 | 字段类型不适合图表 | chart validation、前端展示限制 |

@@ -27,7 +27,7 @@
 
 更安全、也更像实习生真实经历的说法是：
 
-> 在神州数码实习期间，我参与了一个面向企业数据库问答的 Data Agent 原型项目，目标是降低业务人员写 SQL 和理解查询结果的门槛。我主要负责核心 NL-to-SQL / NL-to-data-answer Agent 链路的设计与实现，包括 Schema 扫描、Agent 工具调用、多轮上下文、SQL 自纠错、候选 SQL 执行验证、证据化排序和基于执行结果的 grounded 结果分析。项目以原型验证和内部 PoC 为主，使用 FastAPI、SQLAlchemy、OpenAI 接口、MongoDB/ChromaDB 抽象存储等技术栈。
+> 在神州数码实习期间，我参与了一个面向企业数据库问答的 Data Agent 原型项目，目标是降低业务人员写 SQL 和理解查询结果的门槛。我主要负责核心 NL-to-SQL / NL-to-data-answer Agent 链路的设计与实现，包括 Semantic Layer 业务语义治理、Schema 扫描、Agent 工具调用、多轮上下文、SQL 自纠错、候选 SQL 执行验证与可解释排序、基于执行结果的 grounded 洞察和 ECharts 可视化资产生成。项目以原型验证和内部 PoC 为主，使用 FastAPI、SQLAlchemy、OpenAI 接口、MongoDB/ChromaDB 抽象存储等技术栈。
 
 这样讲的好处：
 
@@ -40,11 +40,11 @@
 
 这个项目可以定位为：
 
-> 一个参考 Dataherald 架构并结合 Data Agent 思路重构的轻量级企业数据问答 Agent 系统。它不是简单让 LLM 一次性生成 SQL，而是把 Semantic Layer、SemanticQueryPlan、数据库环境感知、工具调用、Schema Linking、多轮记忆、执行反馈自纠错、候选 SQL 证据化排序、grounded 结果分析、反馈学习和离线评估串成一个可测试的工程闭环。
+> 一个参考 Dataherald 架构并结合 Data Agent 思路重构的轻量级企业数据问答 Agent 系统。它不是简单让 LLM 一次性生成 SQL，而是把 Semantic Layer 2.0、SemanticQueryPlan、数据库环境感知、工具调用、Schema Linking、多轮记忆、执行反馈自纠错、候选 SQL 可解释排序、grounded 结果洞察、反馈学习、ECharts 可视化资产和离线 Evaluation Benchmark 串成一个可测试的工程闭环。
 
 更面试化的版本：
 
-> 这个项目的亮点不是“我调了一个大模型生成 SQL”，而是“我围绕业务语义不清和 LLM 不可靠这两个核心问题，设计了 Semantic Layer、SemanticQueryPlan、工具约束、执行反馈、候选证据排序、grounded 结果分析和反馈评估闭环”。
+> 这个项目的亮点不是“我调了一个大模型生成 SQL”，而是“我围绕业务语义不清和 LLM 不可靠这两个核心问题，设计了 Semantic Layer 2.0、SemanticQueryPlan、工具约束、执行反馈、候选可解释排序、grounded 结果洞察、可视化资产和反馈评估闭环”。
 
 ## 必须背熟的主链路
 
@@ -66,7 +66,7 @@
 -> LLM 生成 SQL
 -> DAIL/DIN 自纠错
 -> CandidateRanker 执行验证和排序
--> VisualizationRecommender 生成图表建议
+-> VisualizationRecommender 生成 ECharts 可视化资产
 -> ResultAnalyzer 基于最优候选执行结果生成 answer/summary/key_findings
 -> API 返回最终 answer + SQL + result + analysis + candidates 证据
 ```
@@ -476,7 +476,7 @@ python -m compileall -q sql_agent tests main.py
 > 3. ReAct / Plan-and-Solve Agent 调用链路。
 > 4. ConversationManager 多轮上下文接入。
 > 5. DAIL/DIN 风格 SQL 自纠错。
-> 6. CandidateRanker 候选 SQL 执行验证和证据化排序。
+> 6. CandidateRanker 候选 SQL 执行验证和可解释排序。
 > 7. ResultAnalyzer 基于 SQL result 的稳定回答和 LLM grounded 回退。
 > 8. FastAPI `/api/v1/question` 端到端接口和 SQLite + MockLLM 测试。
 

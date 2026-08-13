@@ -1,5 +1,7 @@
 # 2026-08-03 23:39:58 Data Agent 候选排序与证据化增强迭代记录
 
+> 历史记录说明：本文记录的是 CandidateRanker 1.0 当次迭代状态。当前项目已经升级到 CandidateRanker 2.0，支持 `score_breakdown`、`selection_reason`、`source`、`result_shape`、verified query bonus 和 semantic plan match bonus，详见 `docs/iterations/2026-08-13-230519-data-agent-2-0-deepening.md`。
+
 ## 本次目标
 
 参考 `HKUSTDial/awesome-data-agents` 中对 L2 数据 Agent 的能力划分，将当前 NL-to-SQL 原型从“单次 SQL 生成”推进到更像 Data Agent 的链路：多候选、可执行验证、证据化排序、Schema 语义增强。

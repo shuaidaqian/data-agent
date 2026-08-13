@@ -1,5 +1,7 @@
 # 2026-07-15 23:41:20 SQL Agent 后端补齐迭代记录
 
+> 历史记录说明：本文记录的是后端基础补齐当次迭代状态。当前项目已经继续扩展到 Semantic Layer 2.0、CandidateRanker 2.0、ResultAnalyzer 2.0、Visualization 2.0 和 Evaluation Benchmark 2.0，最新状态见 `README.md` 与 `docs/iterations/2026-08-13-230519-data-agent-2-0-deepening.md`。
+
 ## 本次目标
 
 围绕 README 后续开发计划，补齐 SQL Agent 在依赖实例化、真实数据库连接加载、跨请求多轮会话、SQL 提取、工具安全校验、Schema 扫描上下文和集成测试方面的缺口。

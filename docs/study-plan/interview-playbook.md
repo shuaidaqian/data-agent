@@ -6,11 +6,11 @@
 
 我重点关注的是它的核心 Engine，也就是用户输入自然语言问题后，系统如何理解数据库 schema、检索上下文、调用 Agent 工具、生成 SQL 并做验证。分析后我发现原始架构里几个值得增强的点：一是 Agent 控制流依赖 LangChain ZeroShotAgent，可控性有限；二是多轮对话能力不强；三是复杂 SQL，尤其是多表 JOIN 和聚合查询容易出错；四是生成后主要做语法验证，缺少执行反馈驱动的自纠错闭环。
 
-因此我抽取核心链路，重构了一个轻量级 SQL Agent 原型。整体链路是：FastAPI 接收问题，构造 Prompt 和 Conversation；SchemaScanner 扫描数据库表、列、主键、外键和样本值；ContextRetriever 检索 Golden SQL few-shot 示例和管理员指令；AgentSelector 根据问题复杂度选择 ReActAgent 或 PlanSolveAgent；Agent 通过 AgentToolkit 调用查表、取 schema、检查实体值、执行 SQL 等工具；生成 SQL 后再进入 DAIL 或 DIN 风格自纠错，最终返回 SQL 和中间步骤。
+因此我抽取核心链路，重构了一个轻量级 SQL Agent / Data Agent 原型。整体链路是：FastAPI 接收问题，构造 Prompt 和 Conversation；SchemaScanner 扫描数据库表、列、主键、外键和样本值；Semantic Layer 命中指标、维度、时间粒度、默认过滤条件和认证状态，生成 SemanticQueryPlan 并编译语义 SQL 候选；ContextRetriever 检索 Golden SQL few-shot 示例和管理员指令；FeedbackService 召回 verified query；AgentSelector 根据问题复杂度选择 ReActAgent 或 PlanSolveAgent；Agent 通过 AgentToolkit 调用查表、取 schema、检查实体值、执行 SQL 等工具；生成 SQL 后再进入 DAIL 或 DIN 风格自纠错；最后 CandidateRanker 对 semantic SQL、verified query 和 Agent SQL 做执行验证、结果形状校验和可解释排序，ResultAnalyzer 基于最优 SQL result 生成 grounded 洞察，VisualizationRecommender 输出 ECharts 可视化资产。
 
 项目里我比较重视可替换架构，所以实现了一个 IoC 容器，LLM、存储、向量库、上下文和评估器都通过接口注入。这样后续把 OpenAI 换成本地模型，或者把 ChromaDB 换成其他向量库，不需要改业务主链路。
 
-测试方面，我用 pytest 做了分层测试：底层有数据模型、SQL 执行、schema 扫描、schema linking 测试；中间有 Agent 工具和自纠错测试；上层有 API 端到端测试，并用 fake storage、fake vector store 和 mock LLM 隔离真实外部依赖。当前 `pytest -q tests` 是 81 passed、3 skipped，skip 主要是依赖真实 OpenAI、MongoDB、ChromaDB 环境的集成测试。
+测试方面，我用 pytest 做了分层测试：底层有数据模型、SQL 执行、schema 扫描、schema linking 测试；中间有 Agent 工具、自纠错、Semantic Layer、CandidateRanker、ResultAnalyzer、Visualization 和 Evaluation Benchmark 测试；上层有 API 端到端测试，并用 fake storage、fake vector store 和 mock LLM 隔离真实外部依赖。当前 `pytest -q tests` 是 119 passed、3 skipped、2 warnings，skip 主要是依赖真实 OpenAI、MongoDB、ChromaDB 环境的集成测试。
 
 这个项目目前定位是核心 Agent 引擎重构原型，不是完整生产平台。后续如果继续做，我会优先补充权限和审计、schema 大规模压缩、真实评测集、Langfuse 链路追踪和更严格的 SQL AST 安全校验。
 
@@ -18,7 +18,7 @@
 
 1. 背景：Dataherald 是什么，原始架构如何拆分。
 2. 问题：LangChain Agent 可控性、多轮上下文、复杂 JOIN、自纠错不足。
-3. 总体架构：API -> Context -> Schema -> Agent -> Tools -> Correction。
+3. 总体架构：API -> Semantic Layer -> Context -> Schema -> Agent -> Tools -> Correction -> CandidateRanker -> ResultAnalyzer -> Visualization。
 4. 数据模型：Prompt、Conversation、TableDescription、SQLGeneration。
 5. IoC：System.instance 如何替换 LLM、Storage、VectorStore。
 6. SchemaScanner：如何扫描主键、外键、样本值、低基数字段。
@@ -28,9 +28,12 @@
 10. AgentToolkit：工具列表、schema 白名单、执行验证。
 11. Context：Golden SQL、管理员指令、多轮历史。
 12. Correction：DIN 语义验证、DAIL 执行反馈。
-13. Testing：fake 组件、端到端测试、真实集成 skip。
-14. 风险：SQL 安全、LLM 幻觉、schema 过大、外键缺失。
-15. 后续：观测、评测、安全、模型适配。
+13. Semantic Layer 2.0：指标治理、时间粒度、多指标、Join、歧义澄清。
+14. CandidateRanker / ResultAnalyzer / Visualization：可解释决策、grounded 洞察、ECharts 资产。
+15. Feedback + Evaluation：verified query 生命周期、错误归因、benchmark。
+16. Testing：fake 组件、端到端测试、真实集成 skip。
+17. 风险：SQL 安全、LLM 幻觉、schema 过大、外键缺失、语义模型误维护。
+18. 后续：SQL AST、观测、评测、安全、模型适配。
 
 ## 3. 高频追问与参考答案
 
@@ -40,7 +43,7 @@ Dataherald 是一个比较完整的开源 NL->SQL 项目，包含核心引擎、
 
 ### Q2：你的项目和 Dataherald 最大区别是什么？
 
-最大区别是我把核心 Engine 做了轻量化和 Agent 化重构。原始 Dataherald 更依赖 LangChain ZeroShotAgent，我这里实现了原生 ReActAgent 和 PlanSolveAgent，并加入多轮上下文、Schema Linking 和执行反馈自纠错。
+最大区别是我把核心 Engine 做了轻量化和 Agent 化重构。原始 Dataherald 更依赖 LangChain ZeroShotAgent，我这里实现了原生 ReActAgent 和 PlanSolveAgent，并加入多轮上下文、Schema Linking、执行反馈自纠错、Semantic Layer 业务语义治理、多候选 SQL 可解释排序、grounded 结果洞察、ECharts 可视化资产和反馈评估闭环。
 
 ### Q3：为什么不直接用 LangChain Agent？
 
@@ -112,7 +115,27 @@ OpenAI、MongoDB、ChromaDB 依赖本地环境变量和外部服务。没有配�
 
 ### Q20：如果继续做一个月，你优先做什么？
 
-我会优先做三件事：第一，接入 Langfuse 或类似工具记录 Agent 推理链路；第二，引入标准 NL->SQL 评测集和项目自己的 Golden SQL 集；第三，加强 SQL 安全，包括只读连接、AST 解析、白名单和审计。
+我会优先做三件事：第一，引入 SQL AST parser，补 alias、CTE、子查询和列级权限校验；第二，接入 Langfuse 或类似工具记录 SemanticPlan、工具调用、候选 SQL、评分证据和结果分析；第三，把 verified query 召回接入 VectorBackend，并建立更真实的企业 benchmark。
+
+### Q21：Semantic Layer 2.0 解决什么问题？
+
+它解决业务口径问题。裸 schema 只能告诉模型有哪些表和列，但不能说明“有效订单数”到底是否只统计已支付订单、哪个指标是认证口径、按月趋势应该如何截断时间。Semantic Layer 2.0 把指标 owner、version、certified、同义词、默认过滤条件、时间粒度和简单关系 Join 显式建模，让 SQL 成为 SemanticQueryPlan 的编译产物，而不是 LLM 猜出来的字符串。
+
+### Q22：CandidateRanker 2.0 为什么比普通评分更强？
+
+它不只给一个总分，还返回 `score_breakdown`、`selection_reason`、`source` 和 `result_shape`。也就是说系统能说明候选来自 semantic、verified 还是 agent，是否真实执行成功，结果形状是否符合 count / group-by / trend 问题意图，是否命中 verified query 或 semantic plan。这样面试时可以说：系统选择 SQL 有证据，可以复盘。
+
+### Q23：ResultAnalyzer 2.0 如何避免过度解释？
+
+它只基于 SQL result 生成发现，每个 key finding 必须有 `SQL result:` evidence。对于 why 类问题，它不会把“某部门最高”解释成“因为某原因导致”，而是在 limitations 中说明当前结果只能说明数值现象，不能单独证明因果关系。
+
+### Q24：Visualization 2.0 的价值是什么？
+
+它让 API 输出从“文本答案”变成“可消费分析资产”。服务端会基于结果形状推荐 metric card、bar、line、table 或 pie，并输出 ECharts option；同时做字段校验，例如 y 必须是数值、line 的 x 必须是时间字段，避免生成误导图表。
+
+### Q25：Evaluation Benchmark 2.0 怎么体现工程成熟度？
+
+它不只看一次请求是否成功，而是按 case 计算 valid rate、execution accuracy、answer grounding rate、semantic plan accuracy、verified query hit rate，还能按 tag 聚合，并用 error breakdown 归因到 semantic miss、SQL invalid、execution mismatch、ungrounded answer、missing evidence 或 wrong visualization。这样每次迭代可以量化是否真的变好。
 
 ## 4. 项目不足的高质量回答模板
 
@@ -122,6 +145,6 @@ OpenAI、MongoDB、ChromaDB 依赖本地环境变量和外部服务。没有配�
 
 第二是大规模 schema 场景还需要优化。当前方案适合中小规模 schema，如果数据库有上千张表，就需要 schema 分层检索、摘要压缩、缓存和业务关系配置。
 
-第三是评测和观测还需要加强。当前测试能覆盖核心模块和端到端链路，但真实 SQL 语义正确性需要结合 Golden SQL 数据集、执行准确率指标和 Agent 推理链路追踪。
+第三是评测和观测还需要加强。当前测试能覆盖核心模块和端到端链路，也有 Evaluation Benchmark 2.0，但真实 SQL 语义正确性仍需要结合更大规模 Golden SQL 数据集、执行准确率指标、真实业务 case 和 Agent 推理链路追踪。
 
 这样的不足不影响项目作为学习和验证核心架构的价值，但如果走向生产，这些是我会优先补齐的方向。
