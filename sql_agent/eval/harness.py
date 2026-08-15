@@ -15,11 +15,18 @@ class EvaluationCase:
 
     id: str
     question: str
+    difficulty: str = "medium"
+    expected_status: str = "VALID"
     expected_sql_contains: List[str] = field(default_factory=list)
+    forbidden_sql_contains: List[str] = field(default_factory=list)
     expected_result: Dict[str, Any] = field(default_factory=dict)
+    expected_columns: List[str] = field(default_factory=list)
+    expected_row_count: int | None = None
+    expected_any_row: Dict[str, Any] = field(default_factory=dict)
     expected_semantic_metrics: List[str] = field(default_factory=list)
     required_evidence: List[str] = field(default_factory=list)
     expected_visualization_type: str = ""
+    golden_sql: str = ""
     tags: List[str] = field(default_factory=list)
 
 
@@ -34,6 +41,7 @@ class EvaluationReport:
     semantic_plan_accuracy: float
     verified_query_hit_rate: float = 0.0
     tag_metrics: Dict[str, Dict[str, Any]] = field(default_factory=dict)
+    difficulty_metrics: Dict[str, Dict[str, Any]] = field(default_factory=dict)
     error_breakdown: Dict[str, int] = field(default_factory=dict)
 
     def to_markdown(self) -> str:
@@ -52,6 +60,12 @@ class EvaluationReport:
                 *[
                     f"- {tag}: total={metrics['total']}, valid_rate={metrics['valid_rate']:.2f}, execution_accuracy={metrics['execution_accuracy']:.2f}, grounding_rate={metrics['grounding_rate']:.2f}"
                     for tag, metrics in sorted(self.tag_metrics.items())
+                ],
+                "",
+                "## Difficulty Metrics",
+                *[
+                    f"- {difficulty}: total={metrics['total']}, valid_rate={metrics['valid_rate']:.2f}, execution_accuracy={metrics['execution_accuracy']:.2f}, grounding_rate={metrics['grounding_rate']:.2f}"
+                    for difficulty, metrics in sorted(self.difficulty_metrics.items())
                 ],
                 "",
                 "## Error Breakdown",
@@ -90,6 +104,7 @@ class EvaluationHarness:
         semantic = 0
         verified_hits = 0
         tag_buckets: Dict[str, Dict[str, int]] = {}
+        difficulty_buckets: Dict[str, Dict[str, int]] = {}
         error_breakdown = {
             "SEMANTIC_MISS": 0,
             "SQL_INVALID": 0,
@@ -139,6 +154,14 @@ class EvaluationHarness:
                 bucket["valid"] += int(valid_sql)
                 bucket["execution"] += int(execution_match)
                 bucket["grounded"] += grounded_count
+            difficulty_bucket = difficulty_buckets.setdefault(
+                case.difficulty,
+                {"total": 0, "valid": 0, "execution": 0, "grounded": 0},
+            )
+            difficulty_bucket["total"] += 1
+            difficulty_bucket["valid"] += int(valid_sql)
+            difficulty_bucket["execution"] += int(execution_match)
+            difficulty_bucket["grounded"] += grounded_count
 
         return EvaluationReport(
             total=total,
@@ -148,17 +171,33 @@ class EvaluationHarness:
             semantic_plan_accuracy=semantic / total,
             verified_query_hit_rate=verified_hits / total,
             tag_metrics=self._build_tag_metrics(tag_buckets),
+            difficulty_metrics=self._build_tag_metrics(difficulty_buckets),
             error_breakdown=error_breakdown,
         )
 
     def _is_valid_sql_response(self, case: EvaluationCase, response: Dict[str, Any]) -> bool:
         sql = str(response.get("sql", ""))
-        if response.get("status") != "VALID":
+        expected_status = case.expected_status or "VALID"
+        if response.get("status") != expected_status:
             return False
+        if any(token.lower() in sql.lower() for token in case.forbidden_sql_contains):
+            return False
+        if expected_status != "VALID":
+            return True
         return all(token.lower() in sql.lower() for token in case.expected_sql_contains)
 
     def _matches_expected_result(self, case: EvaluationCase, response: Dict[str, Any]) -> bool:
         rows = response.get("result", {}).get("rows", [])
+        columns = response.get("result", {}).get("columns", [])
+        if case.expected_columns and not set(case.expected_columns).issubset(set(columns)):
+            return False
+        if case.expected_row_count is not None and len(rows) != case.expected_row_count:
+            return False
+        if case.expected_any_row:
+            return any(
+                all(row.get(key) == value for key, value in case.expected_any_row.items())
+                for row in rows
+            )
         if not rows:
             return not case.expected_result
         first_row = rows[0]

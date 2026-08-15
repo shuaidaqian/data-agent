@@ -47,7 +47,7 @@ rg -n "^class |^def |^async def " sql_agent tests main.py
 - NL->SQL 系统和普通 CRUD 后端最大的区别是什么？
 - 为什么自然语言转 SQL 需要 Agent，而不是一次 LLM 调用？
 - 为什么项目定位要说“核心引擎重构原型”，而不是“生产级平台”？
-- `pytest -q tests` 中 skipped 的测试可能代表什么？
+- `pytest -q tests` 中 warnings 可能代表什么？
 - `rg -n "^class |^def |^async def " sql_agent tests main.py` 能帮助你看到什么？
 - 如果让你 1 分钟介绍这个项目，你会保留哪三个关键词？
 - 如果让你 5 分钟介绍这个项目，你会按什么顺序展开？
@@ -195,7 +195,7 @@ pytest -q tests/test_ioc_registry.py
 - `Component` 是所有可注入组件的基类。
 - `System.instance()` 负责懒加载和缓存组件实例。
 - `LLMBackend`、`StorageBackend`、`VectorBackend`、`ContextStore`、`Evaluator` 可以被替换。
-- fake 组件如何在测试中替代真实服务。
+- fake 组件如何在测试中替代外部依赖。
 
 **当日产出：**
 
@@ -204,8 +204,8 @@ pytest -q tests/test_ioc_registry.py
 
 **自测问题：**
 
-- 如果要把 OpenAI 换成本地模型，需要改哪里？
-- 为什么 IoC 比直接在业务代码里 `OpenAILLM()` 更好？
+- 如果要把 MockLLM 换成真实模型，需要改哪里？
+- 为什么 IoC 比直接在业务代码里实例化具体 LLM 更好？
 - 自定义实现类型不匹配时应该如何报错？
 - `Settings` 读取环境变量有哪些默认值？
 - `Component.start()` 和 `Component.stop()` 的作用是什么？
@@ -219,8 +219,8 @@ pytest -q tests/test_ioc_registry.py
 - 测试中如何用 monkeypatch 替换环境变量？
 - IoC 对单元测试有什么帮助？
 - IoC 对生产部署有什么帮助？
-- 如果要支持 Gemini，你会新增哪个类，配置哪个环境变量？
-- 如果要把 MongoDB 替换成 PostgreSQL 文档表，你会改哪层？
+- 如果要支持新的模型后端，你会新增哪个类，配置哪个环境变量？
+- 如果要把内存文档存储替换成持久化存储，你会改哪层？
 - 如果组件初始化失败，API 层应该如何处理？
 - IoC 容器和依赖注入框架有什么相似与不同？
 - 当前 IoC 设计是否线程安全？生产环境需要考虑什么？
@@ -607,7 +607,7 @@ pytest -q tests/test_conversation.py tests/test_api_e2e.py
 - 生产环境 conversation 应该存在哪里？
 - 面试官问“如何处理用户说‘那上个月呢’”，你怎么回答？
 
-## Day 12：自纠错、评估和真实集成
+## Day 12：自纠错、评估和 benchmark
 
 **目标：** 掌握 SQL 生成后的验证、执行反馈和质量评估。
 
@@ -623,12 +623,12 @@ pytest -q tests/test_conversation.py tests/test_api_e2e.py
 - `tests/test_evaluator.py`
 - `tests/test_eval_harness.py`
 - `tests/test_eval_benchmark_2.py`
-- `tests/test_real_integrations.py`
+- `tests/test_business_benchmark_dataset.py`
 
 **命令：**
 
 ```bash
-pytest -q tests/test_correction.py tests/test_evaluator.py tests/test_eval_harness.py tests/test_eval_benchmark_2.py tests/test_real_integrations.py
+pytest -q tests/test_correction.py tests/test_evaluator.py tests/test_eval_harness.py tests/test_eval_benchmark_2.py tests/test_business_benchmark_dataset.py
 ```
 
 **必须理解：**
@@ -639,7 +639,7 @@ pytest -q tests/test_correction.py tests/test_evaluator.py tests/test_eval_harne
 - SQL 可执行不等于语义正确。
 - Evaluation Benchmark 2.0 如何输出 tag metrics 和 error breakdown。
 - API case runner 如何批量调用 `/api/v1/question` 并生成 Markdown 报告。
-- 真实 OpenAI、MongoDB、ChromaDB 集成测试为什么可能 skip。
+- SQLite business benchmark 如何验证原型链路。
 
 **当日产出：**
 
@@ -671,8 +671,8 @@ pytest -q tests/test_correction.py tests/test_evaluator.py tests/test_eval_harne
 - `EvaluationHarness` 如何计算 valid rate、execution accuracy、grounding rate？
 - `error_breakdown` 如何帮助定位回归？
 - API benchmark runner 为什么要和模块级 harness 分开？
-- 真实集成测试依赖哪些环境变量或外部服务？
-- skip 真实集成测试是好事还是坏事？如何解释？
+- 为什么原型阶段不保留外部服务集成测试？
+- 如何解释 MockLLM + SQLite benchmark 的测试价值？
 - 面试官问“如何评估 NL->SQL 准确率”，你会提出哪些指标？
 
 ## Day 13：Semantic / Ranking / Analysis / Visualization 2.0
@@ -757,7 +757,7 @@ pytest -q tests
 - 20 个面试追问与答案。
 - 核心技术细节速查表。
 - 项目不足与改进路线。
-- 最终测试结果记录：`119 passed, 3 skipped, 2 warnings`。
+- 最终测试结果记录：以当前 `pytest -q tests` 输出为准。
 
 **验收标准：**
 
@@ -773,15 +773,15 @@ pytest -q tests
 - 如果面试官只允许你讲一个技术亮点，你讲哪个？为什么？
 - 如果面试官问“这个项目难点在哪里”，你按哪三点回答？
 - 如果面试官问“你做了哪些工作”，你如何区分分析、重构、测试、文档？
-- 如果面试官质疑“这只是调用 OpenAI”，你如何反驳？
+- 如果面试官质疑“这只是调用外部模型”，你如何反驳？
 - 如果面试官质疑“规则很简单”，你如何承认局限并说明工程价值？
 - 如果面试官问“为什么不用 LangChain”，你如何回答？
 - 如果面试官问“为什么不用 RAG 直接回答”，你如何解释 NL->SQL 的特殊性？
 - 如果面试官让你现场画架构图，你先画哪些模块？
 - 如果面试官让你现场写一个 SQL 示例，你选哪个业务场景？
 - 如果面试官让你解释测试，如何从单元测试讲到端到端测试？
-- 如果面试官问“119 passed, 3 skipped, 2 warnings 说明什么”，你怎么解释？
-- 如果面试官问 skipped 是否代表测试不完整，你如何回答？
+- 如果面试官问当前测试结果说明什么，你怎么解释？
+- 如果面试官问为什么不做外部服务集成测试，你如何回答？
 - 如果面试官让你设计生产部署，你会补哪些组件？
 - 如果面试官问“如何做权限控制”，你怎么回答？
 - 如果面试官问“如何防止数据泄露”，你怎么回答？
@@ -821,7 +821,7 @@ Day 11:
 pytest -q tests/test_conversation.py tests/test_api_e2e.py
 
 Day 12:
-pytest -q tests/test_correction.py tests/test_evaluator.py tests/test_eval_harness.py tests/test_eval_benchmark_2.py tests/test_real_integrations.py
+pytest -q tests/test_correction.py tests/test_evaluator.py tests/test_eval_harness.py tests/test_eval_benchmark_2.py tests/test_business_benchmark_dataset.py
 
 Day 13:
 pytest -q tests/test_semantic_layer_2.py tests/test_candidate_ranking_2.py tests/test_result_analysis_2.py tests/test_visualization_2.py

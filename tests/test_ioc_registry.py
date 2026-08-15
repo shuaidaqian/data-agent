@@ -20,3 +20,15 @@ def test_ioc_can_instantiate_configured_core_components(monkeypatch):
     assert system.instance(VectorBackend).__class__.__name__ == "MemoryVectorStore"
     assert system.instance(ContextStore).__class__.__name__ == "DefaultContextStore"
     assert system.instance(Evaluator).__class__.__name__ == "SimpleEvaluator"
+
+
+def test_ioc_defaults_use_local_prototype_components(monkeypatch):
+    monkeypatch.delenv("LLM_BACKEND", raising=False)
+    monkeypatch.delenv("STORAGE_BACKEND", raising=False)
+    monkeypatch.delenv("VECTOR_BACKEND", raising=False)
+
+    system = System(Settings())
+
+    assert system.instance(LLMBackend).__class__.__name__ == "MockLLM"
+    assert system.instance(StorageBackend).__class__.__name__ == "InMemoryStorageBackend"
+    assert system.instance(VectorBackend).__class__.__name__ == "InMemoryVectorStore"

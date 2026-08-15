@@ -2,17 +2,17 @@
 
 ## 1. 五分钟项目介绍稿
 
-我这个项目是基于开源 NL->SQL 项目 Dataherald 的架构分析后做的一版核心引擎重构。Dataherald 原始项目是一个企业级自然语言转 SQL 平台，包含 Engine、Enterprise、Admin Console、Slackbot 等服务，核心链路依赖 FastAPI、LangChain、OpenAI、MongoDB 和 ChromaDB。
+我这个项目是基于开源 NL->SQL 项目 Dataherald 的架构分析后做的一版核心引擎重构。Dataherald 原始项目是一个企业级自然语言转 SQL 平台，包含 Engine、Enterprise、Admin Console、Slackbot 等服务，核心链路依赖 FastAPI、LangChain、外部 LLM、文档存储和向量检索。
 
 我重点关注的是它的核心 Engine，也就是用户输入自然语言问题后，系统如何理解数据库 schema、检索上下文、调用 Agent 工具、生成 SQL 并做验证。分析后我发现原始架构里几个值得增强的点：一是 Agent 控制流依赖 LangChain ZeroShotAgent，可控性有限；二是多轮对话能力不强；三是复杂 SQL，尤其是多表 JOIN 和聚合查询容易出错；四是生成后主要做语法验证，缺少执行反馈驱动的自纠错闭环。
 
 因此我抽取核心链路，重构了一个轻量级 SQL Agent / Data Agent 原型。整体链路是：FastAPI 接收问题，构造 Prompt 和 Conversation；SchemaScanner 扫描数据库表、列、主键、外键和样本值；Semantic Layer 命中指标、维度、时间粒度、默认过滤条件和认证状态，生成 SemanticQueryPlan 并编译语义 SQL 候选；ContextRetriever 检索 Golden SQL few-shot 示例和管理员指令；FeedbackService 召回 verified query；AgentSelector 根据问题复杂度选择 ReActAgent 或 PlanSolveAgent；Agent 通过 AgentToolkit 调用查表、取 schema、检查实体值、执行 SQL 等工具；生成 SQL 后再进入 DAIL 或 DIN 风格自纠错；最后 CandidateRanker 对 semantic SQL、verified query 和 Agent SQL 做执行验证、结果形状校验和可解释排序，ResultAnalyzer 基于最优 SQL result 生成 grounded 洞察，VisualizationRecommender 输出 ECharts 可视化资产。
 
-项目里我比较重视可替换架构，所以实现了一个 IoC 容器，LLM、存储、向量库、上下文和评估器都通过接口注入。这样后续把 OpenAI 换成本地模型，或者把 ChromaDB 换成其他向量库，不需要改业务主链路。
+项目里我比较重视可替换架构，所以实现了一个 IoC 容器，LLM、存储、向量库、上下文和评估器都通过接口注入。当前原型默认使用 MockLLM、内存存储和 SQLite benchmark，后续替换真实模型或持久化后端时不需要改业务主链路。
 
-测试方面，我用 pytest 做了分层测试：底层有数据模型、SQL 执行、schema 扫描、schema linking 测试；中间有 Agent 工具、自纠错、Semantic Layer、CandidateRanker、ResultAnalyzer、Visualization 和 Evaluation Benchmark 测试；上层有 API 端到端测试，并用 fake storage、fake vector store 和 mock LLM 隔离真实外部依赖。当前 `pytest -q tests` 是 119 passed、3 skipped、2 warnings，skip 主要是依赖真实 OpenAI、MongoDB、ChromaDB 环境的集成测试。
+测试方面，我用 pytest 做了分层测试：底层有数据模型、SQL 执行、schema 扫描、schema linking、SQL AST safety 和 business benchmark 测试；中间有 Agent 工具、自纠错、Semantic Layer、CandidateRanker、ResultAnalyzer、Visualization 和 Evaluation Benchmark 测试；上层有 API 端到端测试，并用内存存储、内存向量检索和 MockLLM 隔离外部依赖。当前测试重点是 SQLite + MockLLM 原型链路，不包含外部服务集成测试。
 
-这个项目目前定位是核心 Agent 引擎重构原型，不是完整生产平台。后续如果继续做，我会优先补充权限和审计、schema 大规模压缩、真实评测集、Langfuse 链路追踪和更严格的 SQL AST 安全校验。
+这个项目目前定位是核心 Agent 引擎重构原型，不是完整生产平台。后续如果继续做，我会优先把现有 SQL AST 安全校验升级为更完整的权限和审计体系，补充 schema 大规模压缩、真实评测集、Langfuse 链路追踪和更多数据库方言测试。
 
 ## 2. 十五分钟深挖讲解提纲
 
@@ -31,7 +31,7 @@
 13. Semantic Layer 2.0：指标治理、时间粒度、多指标、Join、歧义澄清。
 14. CandidateRanker / ResultAnalyzer / Visualization：可解释决策、grounded 洞察、ECharts 资产。
 15. Feedback + Evaluation：verified query 生命周期、错误归因、benchmark。
-16. Testing：fake 组件、端到端测试、真实集成 skip。
+16. Testing：MockLLM、内存组件、端到端测试、business benchmark。
 17. 风险：SQL 安全、LLM 幻觉、schema 过大、外键缺失、语义模型误维护。
 18. 后续：SQL AST、观测、评测、安全、模型适配。
 
@@ -95,11 +95,11 @@ LLM 本身不知道数据库有哪些表和列。如果直接让它生成 SQL，
 
 ### Q15：为什么端到端测试要用 MockLLM？
 
-真实 LLM 不稳定、成本高、速度慢，而且输出不确定。端到端测试的目标是验证系统链路，不是验证 OpenAI 能力，所以用 MockLLM 可以稳定触发预期路径。
+真实外部模型不稳定、成本高、速度慢，而且输出不确定。端到端测试的目标是验证系统链路，不是验证外部模型能力，所以用 MockLLM 可以稳定触发预期路径。
 
-### Q16：真实集成测试为什么会 skip？
+### Q16：为什么删除外部服务集成测试？
 
-OpenAI、MongoDB、ChromaDB 依赖本地环境变量和外部服务。没有配置时跳过是合理的，否则 CI 或本地开发会因为缺外部环境而失败。
+当前项目定位是可复现原型，核心价值在 SQL Agent 链路、SQLite benchmark、SQL AST 安全和 grounded 分析。外部服务会引入凭据、网络和环境不确定性，反而干扰原型验证，所以删除外部服务测试，保留可替换接口。
 
 ### Q17：如果 schema 有 1000 张表怎么办？
 

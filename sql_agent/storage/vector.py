@@ -1,7 +1,4 @@
-"""
-向量存储抽象层。
-支持 Chroma、Pinecone 和 Astra DB，设计上与 Dataherald 保持一致。
-"""
+"""本地原型使用的向量存储抽象层。"""
 
 from __future__ import annotations
 
@@ -36,16 +33,12 @@ class VectorBackend(Component, ABC):
     def delete_record(self, collection: str, id: str): ...
 
 
-class ChromaVectorStore(VectorBackend):
-    """ChromaDB 向量存储实现"""
+class InMemoryVectorStore(VectorBackend):
+    """用于本地原型的内存向量检索替身。"""
 
     def __init__(self, system: System):
         super().__init__(system)
-        import chromadb
-
-        persist = system.settings.chroma_persist_dir
-        self.client = chromadb.PersistentClient(path=persist)
-        logger.info(f"ChromaDB initialized at: {persist}")
+        self.records: Dict[str, List[Any]] = {}
 
     def query(
         self,
@@ -54,52 +47,28 @@ class ChromaVectorStore(VectorBackend):
         collection: str,
         num_results: int,
     ) -> List[Dict[str, Any]]:
-        try:
-            col = self.client.get_collection(collection)
-        except ValueError:
-            return []
-
-        results = col.query(
-            query_texts=query_texts,
-            n_results=num_results,
-            where={"db_connection_id": db_connection_id},
-        )
-
-        if not results["ids"]:
-            return []
-
-        output = []
-        for i in range(len(results["ids"][0])):
-            output.append(
-                {
-                    "id": results["ids"][0][i],
-                    "score": results["distances"][0][i] if results["distances"] else 0,
-                }
-            )
-        return output
+        query_text = " ".join(query_texts).lower()
+        scored = []
+        for record in self.records.get(collection, []):
+            if str(getattr(record, "db_connection_id", "")) != str(db_connection_id):
+                continue
+            text = f"{getattr(record, 'prompt_text', '')} {getattr(record, 'sql', '')}".lower()
+            score = self._token_overlap(query_text, text)
+            scored.append({"id": str(getattr(record, "id", "")), "score": score})
+        scored.sort(key=lambda item: item["score"], reverse=True)
+        return scored[:num_results]
 
     def add_records(self, records: List[Any], collection: str):
-        for record in records:
-            self.add_record(record, collection)
-
-    def add_record(self, record: Any, collection: str):
-        col = self.client.get_or_create_collection(collection)
-        existing = col.get(ids=[str(record.id)])
-        if len(existing["documents"]) == 0:
-            from sql_metadata import Parser
-
-            tables = ", ".join(Parser(record.sql).tables) if hasattr(record, "sql") else ""
-            col.add(
-                documents=[record.prompt_text],
-                metadatas=[
-                    {
-                        "tables_used": tables,
-                        "db_connection_id": str(record.db_connection_id),
-                    }
-                ],
-                ids=[str(record.id)],
-            )
+        self.records.setdefault(collection, []).extend(records)
 
     def delete_record(self, collection: str, id: str):
-        col = self.client.get_or_create_collection(collection)
-        col.delete(ids=[id])
+        self.records[collection] = [
+            record for record in self.records.get(collection, []) if str(record.id) != id
+        ]
+
+    def _token_overlap(self, left: str, right: str) -> float:
+        left_tokens = {token for token in left.split() if token}
+        right_tokens = {token for token in right.split() if token}
+        if not left_tokens or not right_tokens:
+            return 0.0
+        return len(left_tokens & right_tokens) / len(left_tokens | right_tokens)

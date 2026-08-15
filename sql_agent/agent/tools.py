@@ -11,7 +11,6 @@ from __future__ import annotations
 import datetime
 import difflib
 import logging
-import re
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional
 
@@ -22,6 +21,7 @@ from sql_agent.core.types import (
     TableDescription,
 )
 from sql_agent.llm.base import LLMBackend
+from sql_agent.security import SQLSafetyValidator
 from sql_agent.sql.database import SQLDatabase
 
 logger = logging.getLogger(__name__)
@@ -71,6 +71,10 @@ class AgentToolkit:
         self.instructions = instructions
         self.is_multiple_schema = is_multiple_schema
         self._allowed_tables = self._build_schema_index()
+        self._sql_safety_validator = SQLSafetyValidator(
+            table_descriptions=db_scan,
+            dialect=self.database.dialect,
+        )
 
     def get_tools(self) -> List[ToolDef]:
         """返回可用工具列表"""
@@ -363,64 +367,7 @@ class AgentToolkit:
         )
 
     def _validate_sql_query(self, query: str) -> Optional[ToolResult]:
-        try:
-            from sql_metadata import Parser
-
-            parser = Parser(query)
-        except ModuleNotFoundError:
-            return self._validate_sql_query_fallback(query)
-        except Exception as e:
-            return ToolResult(success=False, output=f"SQL 解析失败，无法执行白名单校验: {e}")
-
-        tables = parser.tables
-        allowed_tables = []
-        for table_name in tables:
-            table = self._find_table(table_name)
-            if not table:
-                return self._schema_denied("表", table_name)
-            allowed_tables.append(table)
-
-        if len(allowed_tables) == 1:
-            table = allowed_tables[0]
-            for column_name in parser.columns:
-                if column_name == "*":
-                    continue
-                if not self._has_column(table, column_name):
-                    return self._schema_denied("列", column_name)
-        return None
-
-    def _validate_sql_query_fallback(self, query: str) -> Optional[ToolResult]:
-        table_names = re.findall(
-            r"\b(?:FROM|JOIN)\s+([`\"\[]?[\w.]+[`\"\]]?)",
-            query,
-            flags=re.IGNORECASE,
-        )
-        allowed_tables = []
-        for table_name in table_names:
-            table = self._find_table(table_name)
-            if not table:
-                return self._schema_denied("表", table_name)
-            allowed_tables.append(table)
-
-        if len(allowed_tables) != 1:
-            return None
-
-        select_match = re.search(
-            r"\bSELECT\b(.*?)\bFROM\b",
-            query,
-            flags=re.IGNORECASE | re.DOTALL,
-        )
-        if not select_match:
-            return None
-
-        table = allowed_tables[0]
-        for raw_column in select_match.group(1).split(","):
-            column_name = re.sub(r"\s+AS\s+\w+$", "", raw_column.strip(), flags=re.IGNORECASE)
-            column_name = column_name.strip().strip('"`[]')
-            if not column_name or column_name == "*" or "(" in column_name:
-                continue
-            if "." in column_name:
-                column_name = column_name.split(".")[-1]
-            if not self._has_column(table, column_name):
-                return self._schema_denied("列", column_name)
+        safety_report = self._sql_safety_validator.validate(query)
+        if not safety_report.allowed:
+            return ToolResult(success=False, output=safety_report.to_message())
         return None

@@ -6,7 +6,7 @@
 
 ## 项目背景
 
-Dataherald 是一个面向企业数据问答场景的开源 NL->SQL 引擎，原始项目采用 FastAPI、LangChain、OpenAI、ChromaDB、MongoDB 等技术栈，并拆分为 Engine、Enterprise、Admin Console、Slackbot 等多个服务。
+Dataherald 是一个面向企业数据问答场景的开源 NL->SQL 引擎，原始项目采用 FastAPI、LangChain、外部 LLM、向量库、文档库等技术栈，并拆分为 Engine、Enterprise、Admin Console、Slackbot 等多个服务。
 
 通过分析 Dataherald 的核心 Engine，可以发现它的主链路大致是：
 
@@ -110,7 +110,7 @@ ResultAnalyzer
 ```text
 sql_agent/
 ├── core/          # 数据模型、配置管理、IoC 容器
-├── llm/           # LLM 抽象层，支持 OpenAI / Azure OpenAI 扩展
+├── llm/           # LLM 抽象层，原型默认使用本地 MockLLM
 ├── agent/         # Agent 框架，包括 ReAct、Plan-and-Solve 和自动选择器
 ├── context/       # 上下文管理，包括多轮对话、few-shot 检索和管理员指令
 ├── sql/           # 数据库层，包括 SQL 执行、Schema 扫描、Schema Linking、复杂 SQL 分解
@@ -120,7 +120,8 @@ sql_agent/
 ├── semantic/      # Semantic Layer、SemanticQueryPlan、语义 SQL 编译
 ├── feedback/      # 用户反馈、verified query 和反馈学习闭环
 ├── visualization/ # 基于 SQL result 的图表推荐和可视化 spec
-├── storage/       # 存储层，包括 MongoDB 文档存储和 ChromaDB 向量存储
+├── security/      # 基于 sqlglot AST 的 SQL 安全校验、表/列白名单和策略报告
+├── storage/       # 存储层，原型默认使用内存文档存储和内存向量检索
 ├── eval/          # SQL 质量评估器、离线 benchmark 和 API case runner
 └── api/           # FastAPI REST 路由
 
@@ -156,7 +157,7 @@ services/          # Dataherald 原始多服务参考实现或源码镜像
 
 - 核心组件可替换。
 - LLM、存储、向量库、评估器等实现不直接写死在业务逻辑里。
-- 后续可以扩展 Claude、Gemini、本地模型、不同向量库和不同文档数据库。
+- 后续可以替换真实模型、本地模型、不同向量库和不同文档数据库实现。
 
 当前实现已经补齐核心组件注册，`System.instance()` 支持通过环境变量自动实例化 `LLMBackend`、`StorageBackend`、`VectorBackend`、`ContextStore` 和 `Evaluator`，并会校验自定义实现是否符合对应抽象类型。
 
@@ -169,7 +170,7 @@ services/          # Dataherald 原始多服务参考实现或源码镜像
 - `embed()`：生成文本 embedding。
 - `count_tokens()`：统计 token 数。
 
-当前默认实现是 `OpenAILLM`，支持 OpenAI 和 Azure OpenAI 的扩展方向。Agent、向量检索和评估器都通过 `LLMBackend` 接口调用模型，而不是直接依赖具体 SDK。
+当前默认实现是 `MockLLM`，用于让原型在没有外部模型服务的情况下稳定运行和测试。Agent、向量检索和评估器都通过 `LLMBackend` 接口调用模型，而不是直接依赖具体 SDK。
 
 ### 4. Agent 推理层
 
@@ -226,7 +227,7 @@ services/          # Dataherald 原始多服务参考实现或源码镜像
 - `FewshotExamplesRetriever`：获取相似 Golden SQL 示例。
 - `GetAdminInstructions`：获取管理员指令。
 
-这层体现了 Agent 的一个关键思想：LLM 不直接访问数据库，而是通过受控工具获取环境信息。当前工具层已经加入 schema 白名单校验，表名和列名必须来自 `SchemaScanner` 扫描得到的 `TableDescription`；`SqlDbQuery` 在执行前也会检查 SQL 中引用的表名，单表查询会额外校验简单列名。当环境缺少 `sql_metadata` 时，会降级使用轻量后备解析，避免核心测试被可选依赖阻断。
+这层体现了 Agent 的一个关键思想：LLM 不直接访问数据库，而是通过受控工具获取环境信息。当前工具层已经接入基于 `sqlglot` 的 AST 安全校验，表名和列名必须来自 `SchemaScanner` 扫描得到的 `TableDescription`；`SqlDbQuery` 在执行前会拒绝非 SELECT、多语句、未知表、未知列、歧义未限定列、受策略限制的 `SELECT *` 和危险函数。相比旧的字符串/regex 校验，AST 校验可以正确处理 alias、JOIN、CTE 和子查询作用域。
 
 ### 6. SQL 与 Schema 层
 
@@ -317,7 +318,7 @@ services/          # Dataherald 原始多服务参考实现或源码镜像
 
 - 从 Semantic Layer、verified query、Agent 主输出和中间步骤中收集候选 SQL。
 - 对候选 SQL 做规范化去重。
-- 执行危险 SQL 拦截和 schema 白名单校验。
+- 执行 `sqlglot` AST 安全校验，并把 `safety` 报告写入候选证据。
 - 执行候选 SQL，收集行数、列名、结果预览和错误。
 - 根据 schema 校验、执行结果、SQL 结构、问题意图、verified query 命中、semantic plan 匹配、结果形状和 Evaluator 分数综合排序。
 - 返回 `score_breakdown`、`selection_reason`、`source` 和 `result_shape`，说明候选 SQL 为什么被选择或降权。
@@ -360,7 +361,9 @@ Feedback 2.0 增强了结构化学习信号：
 - `GET /api/v1/feedback`
 - `GET /api/v1/verified-queries`
 
-`sql_agent/eval/harness.py` 提供离线评估框架，支持从 case YAML 中衡量 SQL 可执行率、执行结果准确率、答案 grounded 率、Semantic plan 命中率和 verified query 命中率。Evaluation Benchmark 2.0 进一步支持 tag-level metrics、`SEMANTIC_MISS` / `SQL_INVALID` / `EXECUTION_MISMATCH` / `UNGROUNDED_ANSWER` / `MISSING_EVIDENCE` / `WRONG_VISUALIZATION` 错误归因，以及 `sql_agent/eval/run_api_cases.py` 批量调用 `/api/v1/question` 并生成 `docs/eval-reports/<timestamp>.md`。
+`sql_agent/eval/harness.py` 提供离线评估框架，支持从 case YAML 中衡量 SQL 可执行率、执行结果准确率、答案 grounded 率、Semantic plan 命中率和 verified query 命中率。Evaluation Benchmark 2.0 进一步支持 tag-level metrics、difficulty metrics、`SEMANTIC_MISS` / `SQL_INVALID` / `EXECUTION_MISMATCH` / `UNGROUNDED_ANSWER` / `MISSING_EVIDENCE` / `WRONG_VISUALIZATION` 错误归因，以及 `sql_agent/eval/run_api_cases.py` 批量调用 `/api/v1/question` 并生成 `docs/eval-reports/<timestamp>.md`。
+
+本次新增的 business benchmark 位于 `eval_cases/business_benchmark.yml`，配套语义模型是 `eval_cases/business_semantic_model.yml`。`sql_agent/eval/demo_business.py` 会构造确定性的 SQLite 业务数据库，包含部门、员工、客户、商品、订单、订单明细、退款和站内行为 8 张表。benchmark 共 40 条问题，覆盖 basic、semantic、join、trend、analysis、visualization 和 safety 场景，前 10 条带可执行 `golden_sql`，用于验证原型环境下的业务 SQL 口径。
 
 ### 13. Visualization Spec
 
@@ -398,9 +401,8 @@ Feedback 2.0 增强了结构化学习信号：
 # 1. 安装依赖
 pip install -r requirements.txt
 
-# 2. 配置环境变量
-cp .env.example .env
-# 编辑 .env，填入 OPENAI_API_KEY、MONGODB_URI 等配置
+# 2. 可选配置环境变量
+# 默认使用 MockLLM + 内存存储 + SQLite benchmark，不需要外部服务凭据
 
 # 3. 启动服务
 python main.py
@@ -433,21 +435,17 @@ pytest -q tests
 - VisualizationRecommender 图表推荐、ECharts option 和字段校验。
 - Evaluation Harness 离线指标评估。
 - API benchmark runner 和 Markdown 评估报告生成。
+- business SQLite benchmark 数据集、语义模型和 40 条业务评估样例。
+- sqlglot AST SQL 安全校验，包括 alias、JOIN、CTE、子查询作用域、未知表/列和多语句拦截。
 - Agent 基类、复杂度判断和工具函数。
 - SQL 注入拦截。
 - 工具层 schema 白名单校验。
 - SchemaScanner 列级样本值采集。
 - SQL 自纠错基础校验。
 - 启发式 SQL 质量评估。
-- OpenAI、MongoDB、ChromaDB 真实集成测试骨架。
+- SQLite + MockLLM 原型端到端测试。
 
-当前本地测试结果：
-
-```text
-119 passed, 3 skipped, 2 warnings
-```
-
-其中 3 个 skipped 是真实 OpenAI、MongoDB、ChromaDB 集成测试，默认需要设置 `RUN_REAL_INTEGRATIONS=true` 才运行。2 个 warnings 分别来自当前 FastAPI TestClient/httpx 组合的弃用提示，以及当前工作区 `.pytest_cache` 写入权限提示。
+当前本地测试结果以最新 `pytest tests -q` 输出为准。当前工作区 `.pytest_cache` 可能因为本机权限设置出现写入 warning，不影响功能断言。
 
 不建议直接运行：
 
@@ -457,21 +455,19 @@ pytest -q
 
 因为仓库中包含 `services/engine/dataherald/tests` 原始 Dataherald 测试，它会被一起收集，并可能因为原始项目依赖未安装而失败。
 
-当前环境下全仓库 `pytest -q` 会在收集 `services/engine/dataherald/tests` 时因为缺少原始子项目依赖 `sql_metadata` 而失败；这不属于根目录重构版 `sql_agent` 模块测试范围。
+当前环境下全仓库 `pytest -q` 仍可能收集 `services/engine/dataherald/tests` 原始子项目测试；这不属于根目录重构版 `sql_agent` 模块测试范围。
 
 ## 当前工程边界
 
 当前项目已经具备清晰的核心架构和模块化实现，核心链路也已经从原型占位推进到可测试的端到端实现，但仍有一些生产化边界需要继续收敛：
 
-1. Azure OpenAI 分支使用了 `azure_api_version`，但配置类中还需要补充该字段。
-2. `SqlDbQuery` 复杂多表查询目前主要校验表名，列级白名单对 alias、聚合表达式、复杂子查询仍采取保守策略，后续可引入更稳定的 SQL AST 解析。
-3. 候选 SQL 当前主要来自 Agent 主输出和中间步骤，后续可以扩展为多策略主动生成候选。
-4. `LLMResultAnalyzer` 当前主要校验 evidence 和数值事实可追溯性，复杂自然语言因果解释仍应保持在 limitations 中，不能当成数据库外的事实判断。
-5. Semantic planner 当前是启发式匹配，SQL compiler 支持多指标、简单维度、默认过滤、Top-K、时间粒度和一跳关系 Join，但还不是完整语义 SQL 编译器。
-6. Verified query 召回使用轻量 token overlap，后续可以接 VectorBackend 做语义召回；生命周期目前是数据结构和 API 层能力，还没有人工审核 UI。
-7. MongoDB 会话存储目前按普通 dict/datetime 写入，后续如果引入更复杂对象，需要统一序列化策略。
-8. 真实 OpenAI、MongoDB、ChromaDB 集成测试已经补充，但默认跳过，需要在具备凭据和外部服务的环境中通过 `RUN_REAL_INTEGRATIONS=true` 显式执行。
-9. 全仓库测试仍受 `services/engine` 原始 Dataherald 子项目依赖影响，需要单独安装该子项目依赖，或配置 pytest 默认只收集根目录重构版测试。
+1. SQL AST 安全校验已经覆盖常见 SELECT、JOIN、alias、CTE 和子查询场景，但还不是完整数据库权限系统；生产环境仍需要叠加数据库只读账号、行列级权限、审计日志和查询资源限制。
+2. 候选 SQL 当前主要来自 Agent 主输出和中间步骤，后续可以扩展为多策略主动生成候选。
+3. `LLMResultAnalyzer` 当前主要校验 evidence 和数值事实可追溯性，复杂自然语言因果解释仍应保持在 limitations 中，不能当成数据库外的事实判断。
+4. Semantic planner 当前是启发式匹配，SQL compiler 支持多指标、简单维度、默认过滤、Top-K、时间粒度和一跳关系 Join，但还不是完整语义 SQL 编译器。
+5. Verified query 召回使用轻量 token overlap，后续可以接更真实的语义召回；生命周期目前是数据结构和 API 层能力，还没有人工审核 UI。
+6. 当前默认使用 MockLLM、内存存储和 SQLite benchmark，定位是可复现原型，不是生产级外部服务集成平台。
+7. 全仓库测试仍可能受 `services/engine` 原始 Dataherald 子项目影响，建议默认只运行根目录重构版测试。
 
 这些边界不影响项目作为学习和展示 Agent 架构的价值，但在面试或简历中应如实表述为“原型系统”和“核心链路重构”，不要包装成完整生产级平台。
 
@@ -529,7 +525,7 @@ pytest -q
 
 > 完整超越 Dataherald 的生产级 NL->SQL 平台。
 
-因为当前项目虽然已经补齐存储接入、会话持久化、API 端到端测试和安全白名单等核心工程项，但真实外部服务验证、复杂 SQL 权限校验和生产级观测治理仍需要继续完善。
+因为当前项目虽然已经补齐存储接入、会话持久化、API 端到端测试和安全白名单等核心工程项，但复杂 SQL 权限校验和生产级观测治理仍需要继续完善。
 
 ## 推荐学习顺序
 
@@ -557,8 +553,7 @@ pytest -q
 - [x] 增加 SQLite + MockLLM 的 API 端到端测试。
 - [x] 为工具层表名、列名增加 schema 白名单校验。
 - [x] 完善 SchemaScanner 的样本值采集和列级上下文写入。
-- [x] 增加真实 OpenAI、MongoDB、ChromaDB 集成测试。
-- [ ] 在具备真实凭据和外部服务的环境中执行 OpenAI、MongoDB、ChromaDB 集成测试。
+- [x] 将默认运行链路收敛为 MockLLM、内存存储和 SQLite benchmark，不依赖外部服务。
 - [x] 增加候选 SQL 执行验证、证据化评分和排序。
 - [x] 将最优候选 SQL 的执行结果透出到 `/api/v1/question`。
 - [x] 增加启发式 `ResultAnalyzer`，生成稳定的 `answer`、`summary` 和 `key_findings`。
@@ -577,11 +572,12 @@ pytest -q
 - [x] Evaluation Benchmark 2.0：支持 API case runner、demo SQLite、tag metrics、错误归因和 Markdown 报告输出。
 - [ ] 扩展多策略候选 SQL 主动生成。
 - [x] 增加图表推荐和可视化 spec 输出，让结果分析进一步从文本答案扩展到可展示洞察。
-- [ ] 强化复杂多表 SQL 的 alias、表达式和子查询列级白名单校验。
-- [ ] 统一 MongoDB 会话和复杂对象的序列化策略。
+- [x] 增加基于 `sqlglot` 的 SQL AST 安全校验，覆盖 alias、CTE、子查询、未知表/列、歧义列和多语句拦截。
+- [x] 增加 SQLite business benchmark 数据集、业务语义模型和 40 条业务评估样例。
+- [ ] 继续强化 AST 安全策略的数据库方言覆盖、行列权限和查询资源限制。
 - [ ] 接入 Langfuse / LangSmith 做 Agent 推理链路追踪。
 - [ ] 接入 Prometheus / Grafana 做服务监控。
-- [ ] 适配更多 LLM 后端，例如 Claude、Gemini、本地模型。
+- [ ] 适配真实模型或本地模型后端。
 - [ ] 支持更细粒度的权限控制和审计日志。
 
 ## 设计原则

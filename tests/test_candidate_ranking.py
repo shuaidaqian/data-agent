@@ -22,6 +22,8 @@ def test_candidate_ranker_selects_executable_aggregate_sql(sql_database, sample_
     assert invalid.status == "INVALID"
     assert invalid.score < ranked[0].score
     assert "不在允许的 schema 白名单" in invalid.evidence
+    assert invalid.safety["allowed"] is False
+    assert invalid.safety["violations"]
 
 
 def test_candidate_ranker_deduplicates_sql(sql_database, sample_table_descriptions):
@@ -38,3 +40,4 @@ def test_candidate_ranker_deduplicates_sql(sql_database, sample_table_descriptio
 
     assert len(ranked) == 1
     assert ranked[0].sql == "SELECT * FROM employees"
+    assert ranked[0].safety["allowed"] is True

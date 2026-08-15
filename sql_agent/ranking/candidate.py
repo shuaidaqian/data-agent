@@ -41,6 +41,7 @@ class SQLCandidate:
     score_components: Dict[str, float] = field(default_factory=dict)
     score_breakdown: Dict[str, float] = field(default_factory=dict)
     result_shape: ResultShapeValidation = field(default_factory=ResultShapeValidation)
+    safety: Dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)

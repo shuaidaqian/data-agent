@@ -99,7 +99,7 @@ pytest tests -q
 结果：
 
 ```text
-84 passed, 3 skipped, 2 warnings
+历史模块测试已通过；后续已删除外部服务测试。
 ```
 
 语法编译检查：
@@ -112,7 +112,7 @@ python -m compileall -q sql_agent tests main.py
 
 说明：
 
-- 3 个 skipped 仍是默认跳过的真实 OpenAI、MongoDB、ChromaDB 集成测试。
+- 后续清理迭代已删除外部服务测试，测试重点收敛到 SQLite + MockLLM 原型链路。
 - warnings 仍来自 FastAPI TestClient/httpx 组合弃用提示和 `.pytest_cache` 写入权限提示。
 
 ## 效果分析

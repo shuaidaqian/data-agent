@@ -10,7 +10,7 @@
  Dataherald 是一个 **自然语言转 SQL 引擎**，面向企业级的问答场景。它能让你用自然语言直接查询关系型数据库。核心引擎基于 Python FastAPI + LangChain，管理后台基于 Next.js。
  
  - **许可证:** Apache 2.0
- - **核心依赖:** LangChain, OpenAI, ChromaDB, MongoDB
+- **核心依赖:** LangChain、外部 LLM、向量库、文档库
  - **项目形态:** Monorepo — services/ 下四个子服务
  
  | 服务 | 技术栈 | 职责 |
@@ -40,11 +40,11 @@
  config.py 定义了可插拔接口系统，所有核心组件可通过环境变量替换：
  
      api_impl       = "dataherald.api.fastapi.FastAPI"
-     db_impl        = "dataherald.db.mongo.MongoDB"
+     db_impl        = "dataherald.db.<document-store>"
      db_scanner_impl= "dataherald.db_scanner.sqlalchemy.SqlAlchemyScanner"
      eval_impl      = "dataherald.eval.simple_evaluator.SimpleEvaluator"
      context_store_impl = "dataherald.context_store.default.DefaultContextStore"
-     vector_store_impl  = "dataherald.vector_store.chroma.Chroma"
+     vector_store_impl  = "dataherald.vector_store.<vector-store>"
  
  System 类通过 instance() 方法懒加载组件实例，实现依赖注入。
  
@@ -84,7 +84,7 @@
  
  ### 3.6 上下文检索
  
- DefaultContextStore 实现两类上下文注入：向量相似度检索 GoldenSQL，以及匹配当前连接的管理员指令。向量库支持 Chroma（默认）、Pinecone、Astra DB。
+ DefaultContextStore 实现两类上下文注入：向量相似度检索 GoldenSQL，以及匹配当前连接的管理员指令。向量库实现可按部署环境替换。
  
  ### 3.7 核心数据模型
  

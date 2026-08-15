@@ -27,7 +27,7 @@
 
 更安全、也更像实习生真实经历的说法是：
 
-> 在神州数码实习期间，我参与了一个面向企业数据库问答的 Data Agent 原型项目，目标是降低业务人员写 SQL 和理解查询结果的门槛。我主要负责核心 NL-to-SQL / NL-to-data-answer Agent 链路的设计与实现，包括 Semantic Layer 业务语义治理、Schema 扫描、Agent 工具调用、多轮上下文、SQL 自纠错、候选 SQL 执行验证与可解释排序、基于执行结果的 grounded 洞察和 ECharts 可视化资产生成。项目以原型验证和内部 PoC 为主，使用 FastAPI、SQLAlchemy、OpenAI 接口、MongoDB/ChromaDB 抽象存储等技术栈。
+> 在神州数码实习期间，我参与了一个面向企业数据库问答的 Data Agent 原型项目，目标是降低业务人员写 SQL 和理解查询结果的门槛。我主要负责核心 NL-to-SQL / NL-to-data-answer Agent 链路的设计与实现，包括 Semantic Layer 业务语义治理、Schema 扫描、Agent 工具调用、多轮上下文、SQL 自纠错、候选 SQL 执行验证与可解释排序、基于执行结果的 grounded 洞察和 ECharts 可视化资产生成。项目以原型验证和内部 PoC 为主，默认使用 MockLLM、内存存储和 SQLite benchmark 保证本地可复现。
 
 这样讲的好处：
 
@@ -40,7 +40,7 @@
 
 这个项目可以定位为：
 
-> 一个参考 Dataherald 架构并结合 Data Agent 思路重构的轻量级企业数据问答 Agent 系统。它不是简单让 LLM 一次性生成 SQL，而是把 Semantic Layer 2.0、SemanticQueryPlan、数据库环境感知、工具调用、Schema Linking、多轮记忆、执行反馈自纠错、候选 SQL 可解释排序、grounded 结果洞察、反馈学习、ECharts 可视化资产和离线 Evaluation Benchmark 串成一个可测试的工程闭环。
+> 一个参考 Dataherald 架构并结合 Data Agent 思路重构的轻量级企业数据问答 Agent 系统。它不是简单让 LLM 一次性生成 SQL，而是把 Semantic Layer 2.0、SemanticQueryPlan、数据库环境感知、工具调用、Schema Linking、多轮记忆、执行反馈自纠错、SQL AST 安全校验、候选 SQL 可解释排序、grounded 结果洞察、反馈学习、ECharts 可视化资产和可复现业务 Evaluation Benchmark 串成一个可测试的工程闭环。
 
 更面试化的版本：
 
@@ -63,9 +63,10 @@
 -> FeedbackService 召回 verified query
 -> AgentSelector 选择 ReAct 或 PlanSolve
 -> AgentToolkit 调用工具观察数据库
+-> SQLSafetyValidator 做 AST 表/列白名单和只读校验
 -> LLM 生成 SQL
 -> DAIL/DIN 自纠错
--> CandidateRanker 执行验证和排序
+-> CandidateRanker 做 AST safety、执行验证和排序
 -> VisualizationRecommender 生成 ECharts 可视化资产
 -> ResultAnalyzer 基于最优候选执行结果生成 answer/summary/key_findings
 -> API 返回最终 answer + SQL + result + analysis + candidates 证据
@@ -75,7 +76,7 @@
 
 你要能在 2 分钟内讲清楚：
 
-> 这个项目是为了解决企业内部业务人员不会写 SQL，但又需要查数和理解结果的问题。传统方案要么依赖数据分析师手写 SQL，要么 BI 报表不够灵活。我们做的是一个轻量级企业数据问答 Agent：用户输入自然语言问题后，系统先通过 Semantic Layer 命中业务指标、维度、同义词、默认过滤条件、时间粒度和认证状态，生成可解释的 SemanticQueryPlan，再编译成 SQL 候选；同时系统会结合 verified query 和 Agent 生成的 SQL，统一做执行验证、结果形状校验和候选排序。最后，系统把最优候选的执行结果透出给 API，基于 SQL result evidence 生成答案、洞察和 ECharts 图表建议。用户反馈如果包含修正 SQL，还会沉淀成带生命周期的 verified query，后续类似问题可以复用。
+> 这个项目是为了解决企业内部业务人员不会写 SQL，但又需要查数和理解结果的问题。传统方案要么依赖数据分析师手写 SQL，要么 BI 报表不够灵活。我们做的是一个轻量级企业数据问答 Agent：用户输入自然语言问题后，系统先通过 Semantic Layer 命中业务指标、维度、同义词、默认过滤条件、时间粒度和认证状态，生成可解释的 SemanticQueryPlan，再编译成 SQL 候选；同时系统会结合 verified query 和 Agent 生成的 SQL，统一做 SQL AST 安全校验、执行验证、结果形状校验和候选排序。最后，系统把最优候选的执行结果透出给 API，基于 SQL result evidence 生成答案、洞察和 ECharts 图表建议。用户反馈如果包含修正 SQL，还会沉淀成带生命周期的 verified query，后续类似问题可以复用；离线侧用 SQLite business benchmark 验证业务 SQL 口径和安全场景。
 
 ## 推荐阅读顺序
 
@@ -169,7 +170,7 @@
 - `DbColumnEntityChecker`
 - `DbRelevantColumnsInfo`
 - schema 白名单怎么做。
-- 危险 SQL 怎么拦截。
+- `SQLSafetyValidator` 如何用 `sqlglot` AST 拦截非 SELECT、多语句、未知表、未知列、歧义列和危险函数。
 
 ### 7. ReAct Agent
 
@@ -286,7 +287,7 @@ SELECT COUNT(*) FROM payroll
 
 回答：
 
-> 不会直接执行。候选排序和工具层都会做 schema 白名单校验，表名必须来自 `TableDescription`，否则标记为 `INVALID`，并把原因写进 evidence。
+> 不会直接执行。候选排序和工具层都会做 `sqlglot` AST 安全校验，表名和列名必须来自 `TableDescription`，否则标记为 `INVALID`，并把结构化 `safety` 报告写进候选证据。
 
 ### 实验 3：危险 SQL
 
@@ -306,7 +307,7 @@ DROP TABLE employees
 
 回答：
 
-> SQL 执行层有危险命令过滤，工具层还有 schema 白名单，形成两层防护。后续生产化还可以接权限系统和 SQL AST 级审计。
+> SQL 执行层有危险命令过滤，工具层和 CandidateRanker 还有 SQL AST 安全校验，形成两层防护。后续生产化还可以接只读账号、行列级权限、查询资源限制和审计日志。
 
 ### 实验 4：LLM 分析器编造数字
 
@@ -350,15 +351,11 @@ DROP TABLE employees
 - `tests/test_agent_tools.py`：工具层和白名单。
 - `tests/test_conversation.py`：多轮会话。
 
-当前测试结果要记住：
-
-```text
-119 passed, 3 skipped, 2 warnings
-```
+当前测试结果不要背固定数字，面试前以本地最新 `pytest tests -q` 输出为准。
 
 面试时可以说：
 
-> 我用 SQLite + MockLLM 做了端到端测试，这样核心链路不依赖真实 OpenAI 也能稳定回归。真实 OpenAI、MongoDB、ChromaDB 集成测试也保留了测试骨架，但默认跳过，需要有凭据时显式执行。
+> 我用 SQLite + MockLLM 做了端到端测试，这样核心链路不依赖外部服务也能稳定回归。当前项目已经删除外部服务集成测试，测试重点放在原型链路、SQL AST 安全和 business benchmark。
 
 ## 3 天快速吃透计划
 
@@ -445,9 +442,9 @@ python -m compileall -q sql_agent tests main.py
 >
 > 我的主要工作是核心 NL-to-SQL / NL-to-data-answer 链路。我没有直接调用 LLM 生成 SQL，而是把系统拆成几层：首先通过 SQLAlchemy 扫描数据库 schema，包括表、列、主外键、样本值、distinct/null 统计和列语义类型；然后 Agent 根据问题复杂度选择 ReAct 或 Plan-and-Solve，通过受控工具获取相关表结构、检查列值、执行 SQL；生成 SQL 后再用执行反馈做 DAIL 风格自纠错。
 >
-> 后面我进一步加了候选 SQL 可解释排序和 grounded 结果洞察。系统不会盲信 LLM 第一条输出，而是收集语义 SQL、verified query 和 Agent SQL 候选，做 schema 白名单校验、危险 SQL 拦截、真实执行、结果形状校验，并根据执行结果、问题意图、verified 命中、semantic plan 匹配和评估分排序。API 返回最终 SQL 的同时，也返回 result、analysis、visualization 和 candidates。最终自然语言答案只基于系统执行 SQL 得到的结果，关键发现必须带 `SQL result:` evidence。
+> 后面我进一步加了候选 SQL 可解释排序和 grounded 结果洞察。系统不会盲信 LLM 第一条输出，而是收集语义 SQL、verified query 和 Agent SQL 候选，做 SQL AST 安全校验、真实执行、结果形状校验，并根据执行结果、问题意图、verified 命中、semantic plan 匹配和评估分排序。API 返回最终 SQL 的同时，也返回 result、analysis、visualization、candidates 和 safety evidence。最终自然语言答案只基于系统执行 SQL 得到的结果，关键发现必须带 `SQL result:` evidence。
 >
-> 这个项目最后用 FastAPI 提供接口，用 SQLite + MockLLM 做了端到端测试，核心模块测试是 119 passed。它目前还是 PoC，但已经验证了一个企业级数据问答 Agent 的核心闭环：业务语义治理、环境感知、工具调用、多轮记忆、执行反馈、可解释决策、可追溯回答、可消费可视化资产和反馈评估。
+> 这个项目最后用 FastAPI 提供接口，用 SQLite + MockLLM 做了端到端测试，并新增一套 40 条 business benchmark。它目前还是 PoC，但已经验证了一个企业级数据问答 Agent 的核心闭环：业务语义治理、环境感知、工具调用、SQL AST 安全、多轮记忆、执行反馈、可解释决策、可追溯回答、可消费可视化资产和反馈评估。
 
 ## 项目最难点回答模板
 
@@ -455,11 +452,11 @@ python -m compileall -q sql_agent tests main.py
 
 > 你觉得最难的地方是什么？
 
-不要说“调用 OpenAI API”。
+不要说“调用外部模型 API”。
 
 可以这样回答：
 
-> 最难的不是生成 SQL，而是如何让生成和回答过程都可控、可验证。LLM 很容易幻觉表名、列名，或者生成语法正确但语义不对的 SQL；即使 SQL 执行成功，LLM 在解释结果时也可能编造数字。所以我做了四件事：第一，用 SchemaScanner 把数据库结构和列级语义结构化；第二，让 Agent 只能通过工具访问数据库，并做 schema 白名单；第三，引入 CandidateRanker，不直接相信第一条 SQL，而是基于执行证据排序；第四，引入 ResultAnalyzer，让最终答案只能基于 SQL result，LLM 输出不 grounded 时自动回退。这样系统从 prompt demo 变成了一个有安全边界、决策证据和答案证据的 Agent。
+> 最难的不是生成 SQL，而是如何让生成和回答过程都可控、可验证。LLM 很容易幻觉表名、列名，或者生成语法正确但语义不对的 SQL；即使 SQL 执行成功，LLM 在解释结果时也可能编造数字。所以我做了五件事：第一，用 SchemaScanner 把数据库结构和列级语义结构化；第二，让 Agent 只能通过工具访问数据库，并用 SQL AST 做表/列白名单；第三，引入 CandidateRanker，不直接相信第一条 SQL，而是基于执行证据排序；第四，引入 ResultAnalyzer，让最终答案只能基于 SQL result，LLM 输出不 grounded 时自动回退；第五，用 business benchmark 把安全、语义、趋势、分析和可视化场景固定下来做回归。这样系统从 prompt demo 变成了一个有安全边界、决策证据、答案证据和评估基准的 Agent。
 
 ## 你负责了哪些模块
 
@@ -472,7 +469,7 @@ python -m compileall -q sql_agent tests main.py
 > 我主要负责核心 Agent 链路和可靠性增强，包括：
 >
 > 1. SchemaScanner 和列级上下文增强。
-> 2. AgentToolkit 工具封装和 schema 白名单校验。
+> 2. AgentToolkit 工具封装和 SQL AST 安全校验。
 > 3. ReAct / Plan-and-Solve Agent 调用链路。
 > 4. ConversationManager 多轮上下文接入。
 > 5. DAIL/DIN 风格 SQL 自纠错。
@@ -538,13 +535,13 @@ python -m compileall -q sql_agent tests main.py
 >
 > 第二，SQL 执行层拦截 `DROP/DELETE/UPDATE/ALTER/TRUNCATE` 等危险命令。
 >
-> 第三，工具层对表名、列名做 schema 白名单。
+> 第三，工具层和 CandidateRanker 用 `sqlglot` AST 对表名、列名、alias、CTE 和子查询作用域做 schema 白名单。
 >
 > 第四，CandidateRanker 执行候选前再次校验表名。
 >
 > 第五，LLMResultAnalyzer 只消费 SQL result，不接触数据库连接；输出必须带 evidence，不可信时回退到启发式分析。
 >
-> 生产环境还可以继续加只读数据库账号、SQL AST 审计、行列级权限控制和查询超时。
+> 生产环境还可以继续加只读数据库账号、行列级权限控制、查询超时、资源配额和审计日志。
 
 ### 9. 这个项目有哪些不足？
 
@@ -555,21 +552,21 @@ python -m compileall -q sql_agent tests main.py
 > 1. 复杂 SQL 的 alias、CTE、子查询列级白名单还比较保守。
 > 2. 候选 SQL 目前主要来自主输出和中间步骤，还没做多策略主动生成。
 > 3. LLM 结果分析当前主要校验 evidence 和数值可追溯性，复杂因果解释还需要更严格的结论类型约束。
-> 4. 真实 OpenAI、MongoDB、ChromaDB 集成测试需要凭据环境才能跑。
+> 4. 当前是 MockLLM + SQLite benchmark 原型，不包含外部服务集成测试。
 > 5. 还没有接 Langfuse 这类 Agent trace 系统。
-> 6. 权限控制还停留在 schema 白名单和危险命令拦截，生产化还需要更细粒度审计。
+> 6. 权限控制已经有 AST 级表/列白名单和危险命令拦截，但生产化还需要数据库账号隔离、行列级权限、查询资源限制和审计。
 
-### 10. `sql_metadata` 不存在怎么办？
+### 10. 现在还依赖旧 SQL 元数据解析器做安全吗？
 
 回答：
 
-> 工具层和 ranker 都有 fallback，用正则解析 FROM/JOIN 表名。这个 fallback 主要保证简单 SQL 不被可选依赖阻断。复杂 SQL 有 alias、CTE、子查询和函数表达式，后续生产化应该引入 SQL AST parser。
+> 工具层和 ranker 现在统一使用 `sqlglot` AST，而不是 regex fallback。AST parser 会解析表、alias、列引用、CTE 和子查询作用域，安全报告会进入工具错误信息和候选 `safety` evidence。
 
 ### 11. 为什么不用正则直接解析所有 SQL？
 
 回答：
 
-> 简单 fallback 可以，但复杂 SQL 有 alias、CTE、子查询、函数表达式，正则不可靠。生产化应该用 SQL AST，把表、alias、列引用、子查询作用域都解析出来。
+> 简单 regex 可以挡一部分问题，但复杂 SQL 有 alias、CTE、子查询、函数表达式，正则不可靠。所以现在用 SQL AST，把表、alias、列引用、子查询作用域都解析出来；生产化时再叠加数据库权限和审计策略。
 
 ### 12. 为什么 CandidateRanker 里 `COUNT` 会加分？
 
@@ -600,7 +597,7 @@ python -m compileall -q sql_agent tests main.py
 
 回答：
 
-> IoC 方便替换 OpenAI、Azure、本地模型，也方便替换 MongoDB/内存存储、Chroma/其他向量库。业务代码依赖接口而不是具体 SDK，测试时可以用 MockLLM 和 MemoryStorage 稳定复现。
+> IoC 方便在接口层替换真实模型、本地模型、内存存储或其他持久化/向量后端。当前业务代码依赖接口而不是具体 SDK，测试时用 MockLLM 和内存存储稳定复现。
 
 ### 16. 这个项目上线需要做什么？
 
@@ -609,7 +606,7 @@ python -m compileall -q sql_agent tests main.py
 > 如果上线到真实企业数据库，需要补：
 >
 > 1. 只读数据库账号。
-> 2. SQL AST 权限审计。
+> 2. SQL AST 权限审计从原型安全校验继续升级到行列级权限、资源限制和审计日志。
 > 3. 查询超时和行数限制。
 > 4. Agent trace。
 > 5. 用户权限和库表权限。
@@ -622,11 +619,11 @@ python -m compileall -q sql_agent tests main.py
 
 可以直接放简历：
 
-> 基于 Dataherald 架构重构企业数据问答 Agent 原型，实现 Semantic Layer 2.0 与 SemanticQueryPlan 中间表示、原生 ReAct / Plan-and-Solve 双 Agent 路由、Schema Scanner/Linking、多轮会话记忆、DIN/DAIL 风格执行反馈自纠错、多候选 SQL 执行验证与可解释排序、grounded 结果洞察、Feedback verified query 生命周期、可消费 ECharts 可视化资产和离线 Evaluation Benchmark。系统提供 FastAPI 接口，使用 SQLite + MockLLM 完成端到端测试，核心模块测试 119 passed。
+> 基于 Dataherald 架构重构企业数据问答 Agent 原型，实现 Semantic Layer 2.0 与 SemanticQueryPlan 中间表示、原生 ReAct / Plan-and-Solve 双 Agent 路由、Schema Scanner/Linking、多轮会话记忆、DIN/DAIL 风格执行反馈自纠错、sqlglot AST 安全校验、多候选 SQL 执行验证与可解释排序、grounded 结果洞察、Feedback verified query 生命周期、可消费 ECharts 可视化资产和离线 Evaluation Benchmark。系统提供 FastAPI 接口，使用 SQLite + MockLLM 完成端到端测试，并构造 40 条 business benchmark 验证业务语义、趋势分析、可视化和安全场景。
 
 如果要贴近实习经历：
 
-> 在神州数码实习期间，参与企业数据库问答 Data Agent 原型建设，负责核心 NL-to-SQL / NL-to-data-answer 链路中的 Semantic Layer 业务语义治理、Schema 理解、Agent 工具调用、安全校验、SQL 自纠错、候选 SQL 可解释排序、结果 grounded 洞察、可视化资产生成和反馈评估闭环。通过 SQLAlchemy 扫描数据库结构与列级语义，结合业务指标语义模型、ReAct/Plan-and-Solve Agent、verified query 反馈学习和 Evaluation Benchmark 提升结果可靠性。
+> 在神州数码实习期间，参与企业数据库问答 Data Agent 原型建设，负责核心 NL-to-SQL / NL-to-data-answer 链路中的 Semantic Layer 业务语义治理、Schema 理解、Agent 工具调用、SQL AST 安全校验、SQL 自纠错、候选 SQL 可解释排序、结果 grounded 洞察、可视化资产生成和反馈评估闭环。通过 SQLAlchemy 扫描数据库结构与列级语义，结合业务指标语义模型、ReAct/Plan-and-Solve Agent、verified query 反馈学习和 business Evaluation Benchmark 提升结果可靠性。
 
 ## 面试时主动展示什么
 

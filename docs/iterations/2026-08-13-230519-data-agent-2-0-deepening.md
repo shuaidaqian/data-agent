@@ -167,7 +167,7 @@
 - `docs/interview-prep-sql-agent.md`
 - `docs/superpowers/plans/2026-08-13-data-agent-2-0-deepening.md`
 
-文档中的项目描述已从 Semantic Layer / Feedback / Evaluation 1.0 更新到 2.0 能力，测试结果更新为 `119 passed, 3 skipped, 2 warnings`。
+文档中的项目描述已从 Semantic Layer / Feedback / Evaluation 1.0 更新到 2.0 能力；后续已删除外部服务测试。
 
 ## 测试结果
 
@@ -182,7 +182,7 @@ pytest tests\test_semantic_layer_2.py tests\test_feedback_2.py tests\test_candid
 
 ```text
 pytest tests -q
-119 passed, 3 skipped, 2 warnings
+历史模块测试已通过；后续已删除外部服务测试。
 ```
 
 已验证 API 端到端：
@@ -220,7 +220,7 @@ pytest tests\test_api_e2e.py -q
 4. verified query 生命周期没有人工审核 UI。
 5. semantic update suggestion 只产出建议，不会自动修改模型文件。
 6. ECharts option 是服务端生成的可消费资产，但没有前端页面承载。
-7. 真实 OpenAI、MongoDB、ChromaDB 测试仍默认跳过，需要真实凭据和外部服务环境。
+7. 后续清理迭代已删除外部服务测试，测试重点收敛到 SQLite + MockLLM 原型链路。
 
 ## 面试表达建议
 

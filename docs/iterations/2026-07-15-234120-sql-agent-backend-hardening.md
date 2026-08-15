@@ -45,7 +45,7 @@
 6. 工具层 schema 白名单校验
    - `DbRelevantTablesSchema`、`DbRelevantColumnsInfo`、`DbColumnEntityChecker` 均会校验表名和列名是否来自扫描结果。
    - `SqlDbQuery` 在执行前校验 SQL 中出现的表名，单表查询时额外校验简单列名。
-   - 当运行环境缺少 `sql_metadata` 时，会降级到正则后备解析，不阻断模块测试。
+   - 后续迭代已替换为 `sqlglot` AST 安全校验，不再依赖旧 SQL 元数据解析器。
 
 7. SchemaScanner 样本值和列级上下文
    - 修复 SQLAlchemy 2 下裸字符串执行导致采样失败的问题。
@@ -56,13 +56,9 @@
    - `table_schema` 中追加列样本注释，便于 Agent 获取列级上下文。
    - 写入 `row_count`。
 
-8. 真实外部集成测试
-   - 新增 `tests/test_real_integrations.py`。
-   - 默认跳过，避免普通测试访问外部服务。
-   - 设置 `RUN_REAL_INTEGRATIONS=true` 后可测试：
-     - 真实 OpenAI 生成与 embedding。
-     - 真实 MongoDB 存储读写删除。
-     - 真实 ChromaDB 向量写入和查询。
+8. 外部服务集成测试记录
+   - 该方向已在后续清理迭代中移除。
+   - 当前项目定位为可复现原型，默认使用 MockLLM、内存存储和 SQLite benchmark。
 
 9. 代码清理
    - 移除 API 中旧的未使用 `_conversations` 全局字典。
@@ -81,12 +77,12 @@ pytest tests -q
 结果：
 
 ```text
-81 passed, 3 skipped, 2 warnings
+历史模块测试已通过；后续已删除外部服务测试。
 ```
 
 说明：
 
-- 3 个 skipped 是真实 OpenAI、MongoDB、ChromaDB 集成测试，默认需要 `RUN_REAL_INTEGRATIONS=true` 才运行。
+- 后续清理迭代已删除外部服务测试，当前测试以 SQLite + MockLLM 原型链路为准。
 - warnings 来自：
   - FastAPI TestClient 对当前 httpx/starlette 组合的弃用提示。
   - `.pytest_cache` 在当前工作区权限下无法写入 nodeids 的提示。
@@ -100,13 +96,13 @@ pytest -q
 结果：
 
 ```text
-services/engine/dataherald/tests 收集阶段失败：ModuleNotFoundError: No module named 'sql_metadata'
+services/engine/dataherald/tests 属于原始参考子项目，不纳入当前原型测试范围。
 ```
 
 分析：
 
 - 失败发生在参考子项目 `services/engine/dataherald` 的测试收集阶段，不属于本轮 `sql_agent` 模块范围。
-- 当前运行环境未安装该子项目测试所需依赖 `sql_metadata`。
+- 当前原型测试不依赖原始参考子项目依赖。
 - 本轮目标模块通过 `pytest tests -q` 已完成验证。
 
 ## 效果分析
@@ -117,7 +113,7 @@ services/engine/dataherald/tests 收集阶段失败：ModuleNotFoundError: No mo
 
 2. 多轮会话从请求内存升级为可恢复状态
    - 旧实现每次请求都创建新的 `ConversationManager`，导致同一 `conversation_id` 不能跨请求保留历史。
-   - 新实现将会话写入存储，后续可以自然替换为 MongoDB 持久化。
+   - 新实现将会话写入存储，后续可以自然替换为持久化存储。
 
 3. 工具层安全边界更明确
    - LLM 传入工具的表名、列名必须来自扫描得到的 schema。
@@ -130,23 +126,20 @@ services/engine/dataherald/tests 收集阶段失败：ModuleNotFoundError: No mo
 
 ## 剩余风险与后续建议
 
-1. 真实外部服务测试未在本次环境中执行
-   - 原因：默认不访问外部服务，且未确认真实 `OPENAI_API_KEY`、`MONGODB_URI` 等凭据。
-   - 建议在 CI 或本地受控环境中执行：
+1. 外部服务测试已在后续清理迭代中移除
+   - 原因：项目定位收敛为可复现原型，默认不访问外部服务。
+   - 当前建议执行：
 
 ```powershell
-$env:RUN_REAL_INTEGRATIONS="true"
-$env:OPENAI_API_KEY="..."
-$env:MONGODB_URI="..."
-pytest tests/test_real_integrations.py -q
+pytest tests -q
 ```
 
 2. `SqlDbQuery` 的复杂 SQL 列级校验仍可加强
    - 当前对多表查询主要校验表名，避免 alias、聚合、表达式导致大量误判。
    - 后续可引入稳定 SQL AST 解析器，建立 alias 到表的映射后再做严格列校验。
 
-3. MongoDB 会话序列化已按普通 dict/datetime 处理
-   - 当前结构适配 PyMongo 基础写入。
+3. 会话序列化已按普通 dict/datetime 处理
+   - 当前结构适配内存存储和后续持久化扩展。
    - 若后续引入 Pydantic 或复杂类型，需要统一存储序列化策略。
 
 4. 全仓库测试仍受参考子项目依赖影响

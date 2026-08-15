@@ -28,6 +28,9 @@ class TestSQLDatabase:
         assert any("employees" in t for t in tables)
         assert any("departments" in t for t in tables)
 
+    def test_dialect_name_is_sqlglot_compatible(self, sql_database):
+        assert sql_database.dialect == "sqlite"
+
     def test_sql_injection_drop(self, sql_database):
         with pytest.raises(SQLInjectionError):
             sql_database.run_sql("DROP TABLE employees")

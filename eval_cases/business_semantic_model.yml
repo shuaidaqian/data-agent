@@ -1,0 +1,139 @@
+version: 2
+db_connection_id: business_demo
+metrics:
+  - name: gmv
+    label: 成交额
+    table: order_items
+    expression: SUM(order_items.quantity * order_items.unit_price)
+    synonyms: [GMV, 销售额, 订单金额, 成交金额]
+    default_filters:
+      - field: orders.status
+        op: IN
+        value: [paid, refunded]
+    description: 已支付及已退款订单在订单明细口径下的商品成交额，不扣减退款。
+    version: v2
+    owner: sales-ops
+    certified: true
+  - name: net_revenue
+    label: 净收入
+    table: order_items
+    expression: SUM(order_items.quantity * order_items.unit_price) - SUM(orders.discount_amount)
+    synonyms: [净销售额, 扣减折扣收入, 实收收入]
+    default_filters:
+      - field: orders.status
+        op: "="
+        value: paid
+    description: 已支付订单商品金额扣减订单折扣后的收入。
+    version: v1
+    owner: finance
+    certified: true
+  - name: paid_order_count
+    label: 已支付订单数
+    table: orders
+    expression: COUNT(DISTINCT orders.id)
+    synonyms: [订单数, 成交订单数, 支付订单数]
+    default_filters:
+      - field: orders.status
+        op: "="
+        value: paid
+    version: v1
+    owner: sales-ops
+    certified: true
+  - name: refund_amount
+    label: 退款金额
+    table: refunds
+    expression: SUM(refunds.amount)
+    synonyms: [退款, 退费, 退款额]
+    version: v1
+    owner: finance
+    certified: true
+  - name: gross_margin
+    label: 毛利
+    table: order_items
+    expression: SUM(order_items.quantity * (order_items.unit_price - products.cost))
+    synonyms: [毛利润, 利润, 粗毛利]
+    default_filters:
+      - field: orders.status
+        op: "="
+        value: paid
+    version: v1
+    owner: finance
+    certified: false
+dimensions:
+  - name: order_month
+    label: 下单月份
+    table: orders
+    column: orders.order_date
+    synonyms: [月份, 月度, 按月]
+    type: time
+    grain: month
+    grain_expressions:
+      month: strftime('%Y-%m', orders.order_date)
+      quarter: substr(orders.order_date, 1, 4) || '-Q' || ((cast(strftime('%m', orders.order_date) as integer) + 2) / 3)
+  - name: customer_region
+    label: 客户区域
+    table: customers
+    column: customers.region
+    synonyms: [区域, 大区, 地区]
+    type: categorical
+  - name: customer_segment
+    label: 客户分层
+    table: customers
+    column: customers.segment
+    synonyms: [客户类型, 客群, 客户分层]
+    type: categorical
+  - name: product_category
+    label: 产品类别
+    table: products
+    column: products.category
+    synonyms: [品类, 产品线, 类别]
+    type: categorical
+  - name: sales_channel
+    label: 销售渠道
+    table: orders
+    column: orders.channel
+    synonyms: [渠道, 订单渠道, 来源渠道]
+    type: categorical
+  - name: employee_department
+    label: 员工部门
+    table: departments
+    column: departments.name
+    synonyms: [部门, 组织, 团队]
+    type: categorical
+relationships:
+  - name: orders_customers
+    left_table: orders
+    right_table: customers
+    left_key: customer_id
+    right_key: id
+    join_type: JOIN
+  - name: orders_order_items
+    left_table: orders
+    right_table: order_items
+    left_key: id
+    right_key: order_id
+    join_type: JOIN
+  - name: order_items_products
+    left_table: order_items
+    right_table: products
+    left_key: product_id
+    right_key: id
+    join_type: JOIN
+  - name: orders_employees
+    left_table: orders
+    right_table: employees
+    left_key: employee_id
+    right_key: id
+    join_type: JOIN
+  - name: employees_departments
+    left_table: employees
+    right_table: departments
+    left_key: department_id
+    right_key: id
+    join_type: JOIN
+  - name: orders_refunds
+    left_table: orders
+    right_table: refunds
+    left_key: id
+    right_key: order_id
+    join_type: LEFT JOIN

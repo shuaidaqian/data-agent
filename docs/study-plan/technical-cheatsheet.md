@@ -12,11 +12,11 @@
 | Pydantic | 定义 API 请求和响应模型 | 让 HTTP 输入输出有结构和校验 |
 | dataclass | 定义内部核心数据对象 | 适合轻量数据容器，比 dict 更清晰 |
 | SQLAlchemy | 数据库连接、执行 SQL、inspect schema | 屏蔽不同数据库差异，支持 engine 和 inspector |
-| OpenAI SDK | LLM 生成、embedding | 通过 `LLMBackend` 抽象，避免业务层直接依赖 SDK |
-| ChromaDB | Golden SQL 向量检索 | 根据用户问题召回相似 few-shot 示例 |
-| MongoDB | 文档存储 | 保存连接、Golden SQL、表描述、指令等结构化记录 |
-| pytest | 单元测试、集成测试、端到端测试 | fake 组件隔离外部依赖，真实集成测试按环境跳过 |
-| sqlparse / sql_metadata | SQL 解析和表名识别 | 工具白名单和 SQL 安全校验的辅助能力 |
+| MockLLM | 本地原型 LLM 替身 | 不依赖外部模型服务，保证端到端测试稳定 |
+| InMemoryVectorStore | Golden SQL 轻量检索 | 根据用户问题召回相似 few-shot 示例 |
+| InMemoryStorageBackend | 文档存储 | 保存连接、Golden SQL、表描述、指令等结构化记录 |
+| pytest | 单元测试、模块测试、端到端测试 | fake 组件隔离外部依赖，重点验证 SQLite + benchmark 原型链路 |
+| sqlglot | SQL AST 解析和安全校验 | 解析 alias、CTE、子查询作用域，做表/列白名单和只读策略校验 |
 
 ## 3. 主链路
 
@@ -181,13 +181,13 @@ sales.product_id -> products.id
 | Analysis 2.0 测试 | `tests/test_result_analysis_2.py` | 验证 Top K、占比、why 限制和 finding type |
 | Visualization 2.0 测试 | `tests/test_visualization_2.py` | 验证 ECharts option、字段校验和 pie |
 | Evaluation 2.0 测试 | `tests/test_eval_benchmark_2.py` | 验证 tag metrics、错误归因和 API case runner |
-| 真实集成测试 | `tests/test_real_integrations.py` | 有环境变量时测试真实 OpenAI/Mongo/Chroma |
+| Business Benchmark 测试 | `tests/test_business_benchmark_dataset.py` | 验证 SQLite 业务数据集、语义模型和 40 条 benchmark |
 
 当前基线：
 
 ```text
 pytest -q tests
-119 passed, 3 skipped, 2 warnings
+以最新 `pytest -q tests` 输出为准
 ```
 
 ## 10. Semantic Layer 2.0
@@ -287,7 +287,7 @@ Evaluation：
 | 外键缺失 | JOIN 路径找不到 | 业务关系配置、历史 SQL 学习 |
 | SQL 安全 | LLM 可能生成危险 SQL | 只读账号、白名单、AST 解析、审计日志 |
 | 执行反馈误导 | 0 行不一定错误 | 结合语义检查和样本统计 |
-| 真实服务不稳定 | OpenAI/Mongo/Chroma 依赖环境 | fake 测试 + 真实集成测试分层 |
+| 外部服务不稳定 | 原型阶段不依赖外部服务 | MockLLM + 内存存储 + SQLite benchmark |
 | 语义模型误维护 | 指标口径如果配置错，SQL 会稳定地错 | owner/certified、审核流、benchmark 回归 |
 | 候选排序误判 | 真实执行成功但语义仍可能错 | golden benchmark、verified query、LLM evaluator、人工反馈 |
 | 结果分析过度解释 | 相关性结果被说成因果 | finding type、why limitation、grounding 校验 |

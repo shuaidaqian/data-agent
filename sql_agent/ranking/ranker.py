@@ -11,6 +11,7 @@ from sql_agent.ranking.candidate import (
     ResultShapeValidation,
     SQLCandidate,
 )
+from sql_agent.security import SQLSafetyPolicy, SQLSafetyValidator
 from sql_agent.sql.database import SQLDatabase
 
 
@@ -32,7 +33,11 @@ class CandidateRanker:
         self.verified_sqls = {
             self._normalize_sql(sql) for sql in (verified_sqls or []) if str(sql).strip()
         }
-        self._tables = self._build_table_index(table_descriptions)
+        self._sql_safety_validator = SQLSafetyValidator(
+            table_descriptions=table_descriptions,
+            policy=SQLSafetyPolicy(allow_select_star=True),
+            dialect=self.database.dialect,
+        )
 
     def rank(
         self, question: str, candidates: Iterable[str], limit: Optional[int] = None
@@ -48,7 +53,9 @@ class CandidateRanker:
             candidate.source = "verified"
         elif self.semantic_plan and self._matches_semantic_plan(candidate.sql):
             candidate.source = "semantic"
-        validation_error = self._validate_sql(candidate.sql)
+        safety_report = self._validate_sql(candidate.sql)
+        candidate.safety = safety_report.to_dict()
+        validation_error = None if safety_report.allowed else safety_report.to_message()
         if validation_error:
             candidate.status = "INVALID"
             candidate.evidence = validation_error
@@ -234,49 +241,20 @@ class CandidateRanker:
         )
         return metric_match and dimension_match
 
-    def _validate_sql(self, sql: str) -> Optional[str]:
-        try:
-            self.database.parser_to_filter_commands(sql)
-        except Exception as exc:
-            return f"SQL 安全校验失败：{exc}"
+    def _validate_sql(self, sql: str):
+        report = self._sql_safety_validator.validate(sql)
+        if report.allowed and not report.tables:
+            report.allowed = False
+            report.risk_level = "BLOCKED"
+            from sql_agent.security import SQLSafetyViolation, SQLViolationType
 
-        table_names = self._extract_table_names(sql)
-        if not table_names:
-            return "SQL 未引用任何允许的数据表"
-
-        for table_name in table_names:
-            if self._normalize_identifier(table_name) not in self._tables:
-                return f"表 `{table_name}` 不在允许的 schema 白名单中"
-        return None
-
-    def _extract_table_names(self, sql: str) -> List[str]:
-        try:
-            from sql_metadata import Parser
-
-            return list(Parser(sql).tables)
-        except ModuleNotFoundError:
-            return re.findall(
-                r"\b(?:FROM|JOIN)\s+([`\"\[]?[\w.]+[`\"\]]?)",
-                sql,
-                flags=re.IGNORECASE,
+            report.violations.append(
+                SQLSafetyViolation(
+                    type=SQLViolationType.UNSUPPORTED_SQL.value,
+                    message="SQL 未引用任何允许的数据表。",
+                )
             )
-        except Exception:
-            return []
-
-    def _build_table_index(
-        self, table_descriptions: List[TableDescription]
-    ) -> Dict[str, TableDescription]:
-        index = {}
-        for table in table_descriptions:
-            names = [table.table_name]
-            if table.schema_name:
-                names.append(f"{table.schema_name}.{table.table_name}")
-            for name in names:
-                index[self._normalize_identifier(name)] = table
-        return index
-
-    def _normalize_identifier(self, value: str) -> str:
-        return value.strip().strip('"`[]').lower()
+        return report
 
     def _normalize_sql(self, value: str) -> str:
         return " ".join(value.strip().rstrip(";").split()).lower()

@@ -66,3 +66,16 @@ class TestAgentToolkit:
         r = toolkit._check_entity("payroll -> name, Alice")
         assert not r.success
         assert "不在允许的 schema 白名单" in r.output
+
+    def test_execute_query_rejects_unknown_column_by_ast_safety(self, toolkit):
+        r = toolkit._execute_query("SELECT secret_salary FROM employees")
+
+        assert not r.success
+        assert "SQL AST 安全校验失败" in r.output
+        assert "secret_salary" in r.output
+
+    def test_execute_query_rejects_dangerous_statement_by_ast_safety(self, toolkit):
+        r = toolkit._execute_query("DELETE FROM employees")
+
+        assert not r.success
+        assert "SQL AST 安全校验失败" in r.output

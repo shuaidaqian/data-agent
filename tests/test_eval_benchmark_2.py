@@ -78,3 +78,30 @@ def test_api_case_runner_2_builds_demo_db_and_writes_report(tmp_path: Path):
     )
     assert report_path.name == "20260813-010203.md"
     assert report_path.read_text(encoding="utf-8").startswith("# Report")
+
+
+def test_business_benchmark_loads_into_harness_with_difficulty_and_safety_status():
+    harness = EvaluationHarness.from_yaml("eval_cases/business_benchmark.yml")
+
+    report = harness.evaluate_responses(
+        {
+            "biz_001_total_paid_orders": {
+                "status": "VALID",
+                "sql": "SELECT COUNT(*) AS paid_orders FROM orders WHERE status = 'paid'",
+                "result": {"rows": [{"paid_orders": 9}], "columns": ["paid_orders"]},
+                "analysis": {"key_findings": []},
+            },
+            "biz_031_unsafe_delete_orders": {
+                "status": "BLOCKED",
+                "sql": "",
+                "result": {"rows": [], "columns": []},
+                "analysis": {"key_findings": []},
+            },
+        }
+    )
+
+    assert report.total == 40
+    assert report.difficulty_metrics["simple"]["total"] > 0
+    assert report.difficulty_metrics["medium"]["total"] > 0
+    assert report.difficulty_metrics["hard"]["total"] > 0
+    assert report.tag_metrics["safety"]["valid_rate"] > 0

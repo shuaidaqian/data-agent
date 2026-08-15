@@ -2,7 +2,7 @@
 
 ## 一句话定位
 
-这是一个参考 Dataherald 架构并结合 Data Agent 思路重构的轻量级企业数据问答 Agent 系统。它不是简单让 LLM 一次性生成 SQL，而是把 Semantic Layer 2.0、SemanticQueryPlan、数据库环境感知、工具调用、Schema Linking、多轮记忆、执行反馈自纠错、候选 SQL 可解释排序、grounded 结果洞察、ECharts 可视化资产、反馈学习和 Evaluation Benchmark 串成一个可测试的工程闭环。
+这是一个参考 Dataherald 架构并结合 Data Agent 思路重构的轻量级企业数据问答 Agent 系统。它不是简单让 LLM 一次性生成 SQL，而是把 Semantic Layer 2.0、SemanticQueryPlan、数据库环境感知、工具调用、Schema Linking、多轮记忆、执行反馈自纠错、SQL AST 安全校验、候选 SQL 可解释排序、grounded 结果洞察、ECharts 可视化资产、反馈学习和可复现业务 Benchmark 串成一个可测试的工程闭环。
 
 ## 面试官容易眼前一亮的亮点
 
@@ -54,21 +54,22 @@
 
 > 对多表查询，我没有完全让 LLM 猜 JOIN 条件，而是从数据库外键构建关系图，通过 Schema Linking 给出可解释的 JOIN 路径。
 
-### 4. 工具层安全边界和白名单校验
+### 4. SQL AST 安全边界和白名单校验
 
 项目的 LLM 不直接访问数据库，而是通过 `AgentToolkit` 的受控工具访问。
 
 当前能力：
 
-- 危险 SQL 拦截：`DROP`、`DELETE`、`UPDATE`、`TRUNCATE` 等。
-- 工具层表名白名单。
-- 工具层列名白名单。
-- 候选 SQL 排序阶段再次进行 schema 校验。
-- 缺少 `sql_metadata` 时有后备解析逻辑。
+- 基于 `sqlglot` AST 解析 SQL，而不是依赖字符串切分。
+- 拦截非 SELECT、多语句、未知表、未知列、歧义未限定列和危险函数。
+- 支持 alias、JOIN、CTE 和子查询作用域，避免复杂查询被简单 regex 误判。
+- `AgentToolkit.SqlDbQuery` 执行前强制校验。
+- `CandidateRanker` 对每条候选 SQL 附加 `safety` 报告，面试时可以展示为什么某条 SQL 被拒绝。
+- SQLite 的 `main/temp` 默认 schema 会规范化为裸表名，业务 benchmark 和工具层口径一致。
 
 面试表达：
 
-> 我把 LLM 约束在工具层里，所有表名、列名都必须来自扫描过的 schema。这样即使模型幻觉出不存在的表或危险 SQL，也会在执行前被拦截。
+> 我把 SQL 安全从 regex 提升到 AST 层。所有候选 SQL 在执行前都会被解析成语法树，只允许访问扫描过的表和列，并且能正确处理 alias、CTE 和子查询作用域。这样模型即使生成危险 SQL、幻觉表名或引用不存在的列，也会在工具层和候选排序层被拦截，并留下结构化 safety evidence。
 
 ### 5. 多轮对话不是 prompt 拼接，而是结构化会话对象
 
@@ -129,6 +130,7 @@
 - 综合 schema、执行结果、问题意图和 Evaluator 分数排序。
 - 输出 `score_breakdown`、`selection_reason`、`source` 和 `result_shape`，让候选选择可以被复盘。
 - verified query 命中和 semantic plan 匹配会进入评分，但仍必须通过真实执行。
+- 每条候选 SQL 都带 `safety` 报告，包含 allowed、risk_level、引用表、引用列和违规原因。
 - API 返回 `candidates`，让系统选择过程透明可解释。
 - 向 API 透出最优候选 SQL 的执行结果，作为最终答案的证据来源。
 
@@ -165,11 +167,12 @@
 - verified query 有 `PENDING_REVIEW`、`VERIFIED`、`DEPRECATED`、`REJECTED` 生命周期和质量信号。
 - 对指标定义错误的反馈可以生成语义模型更新建议，例如给指标补默认过滤条件。
 - `EvaluationHarness` 支持衡量 valid rate、execution accuracy、answer grounding rate、semantic plan accuracy 和 verified query hit rate。
-- Evaluation Benchmark 2.0 支持 tag-level metrics、错误归因、API case runner、demo SQLite 构造和 Markdown 报告输出。
+- Evaluation Benchmark 2.0 支持 tag-level metrics、difficulty metrics、错误归因、API case runner、demo SQLite 构造和 Markdown 报告输出。
+- 新增 business benchmark：用确定性 SQLite 构造部门、员工、客户、商品、订单、订单明细、退款和站内行为 8 张表，配套 40 条业务问题和 Semantic Layer，覆盖 basic、semantic、join、trend、analysis、visualization、safety 场景。
 
 面试表达：
 
-> 我没有把错误处理停留在单次自纠错，而是增加了反馈闭环。用户修正后的 SQL 会沉淀成 verified query，下次类似问题可以优先复用；同时我做了离线评估框架，用 valid rate、execution accuracy 和 answer grounding rate 衡量每次迭代是否真的变好。
+> 我没有把错误处理停留在单次自纠错，而是增加了反馈和评估闭环。用户修正后的 SQL 会沉淀成 verified query，下次类似问题可以优先复用；同时我构造了可复现的 SQLite 业务 benchmark，用 valid rate、execution accuracy、answer grounding rate、tag metrics 和 difficulty metrics 衡量每次迭代是否真的变好。
 
 ### 11. 可替换 IoC 架构
 
@@ -185,7 +188,7 @@
 
 面试表达：
 
-> 我把 LLM、存储、向量库、上下文检索和评估器都抽象成可替换组件，业务代码依赖接口而不是具体 SDK，方便后续切 OpenAI、Azure、本地模型或不同向量库。
+> 我把 LLM、存储、向量库、上下文检索和评估器都抽象成可替换组件，业务代码依赖接口而不是具体 SDK。当前原型默认使用 MockLLM、内存存储和 SQLite benchmark，后续需要时再替换为真实模型或持久化后端。
 
 ### 12. 测试覆盖不是摆设
 
@@ -205,15 +208,13 @@
 - FeedbackService 和 verified query。
 - VisualizationRecommender 与 ECharts option。
 - Evaluation Benchmark。
+- sqlglot AST SQL 安全校验。
+- business SQLite benchmark 数据集和 40 条业务评估样例。
 - 自纠错。
 - Evaluator。
-- 真实 OpenAI/MongoDB/ChromaDB 集成测试骨架。
+- SQLite + MockLLM 原型端到端测试。
 
-最新验证结果：
-
-```text
-119 passed, 3 skipped, 2 warnings
-```
+最新验证结果以本地 `pytest tests -q` 为准；当前完整模块验证覆盖根目录重构版测试、business benchmark、SQL AST safety、工具层、候选排序和评估 Harness。
 
 面试表达：
 
@@ -243,7 +244,7 @@
 
 ## 可以直接放进简历的描述
 
-> 基于 Dataherald 架构重构企业数据问答 Agent 原型，实现 Semantic Layer 2.0 与 SemanticQueryPlan 中间表示、原生 ReAct / Plan-and-Solve 双 Agent 路由、Schema Scanner/Linking、多轮会话记忆、DIN/DAIL 风格执行反馈自纠错、多候选 SQL 执行验证与可解释排序、grounded 结果洞察、Feedback verified query 生命周期、可消费 ECharts 可视化资产和离线 Evaluation Benchmark。系统提供 FastAPI 接口，使用 SQLite + MockLLM 完成端到端测试，核心模块测试 119 passed。
+> 基于 Dataherald 架构重构企业数据问答 Agent 原型，实现 Semantic Layer 2.0 与 SemanticQueryPlan 中间表示、原生 ReAct / Plan-and-Solve 双 Agent 路由、Schema Scanner/Linking、多轮会话记忆、DIN/DAIL 风格执行反馈自纠错、sqlglot AST 安全校验、多候选 SQL 执行验证与可解释排序、grounded 结果洞察、Feedback verified query 生命周期、可消费 ECharts 可视化资产和离线 Evaluation Benchmark。系统提供 FastAPI 接口，使用 SQLite + MockLLM 完成端到端测试，并构造 40 条 business benchmark 覆盖业务语义、趋势分析、可视化和安全场景。
 
 ## 面试时可以主动展示的接口返回
 
@@ -309,10 +310,8 @@
    - 语义模型 API 管理。
 
 2. SQL AST 级权限校验
-   - alias 解析。
-   - CTE 解析。
-   - 子查询列级校验。
-   - 聚合表达式解析。
+   - 已完成 alias、CTE、子查询作用域和列级白名单基础校验。
+   - 后续重点是多数据库方言、行列级权限、资源限制和审计日志。
 
 3. Schema / Semantic Memory
    - 将列语义、样本值、业务同义词写入向量库。

@@ -91,7 +91,7 @@ flowchart TD
 
 ```mermaid
 flowchart TD
-    A["真实集成测试 OpenAI/Mongo/Chroma"] --> B["API 端到端测试 MockLLM + Fake Storage"]
+    A["Business Benchmark SQLite + MockLLM"] --> B["API 端到端测试 MockLLM + 内存存储"]
     B --> C["模块集成测试 SQL/JOIN/Schema/Conversation"]
     C --> D["单元测试 数据模型/工具/纠错/评估"]
 ```

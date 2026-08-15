@@ -39,7 +39,9 @@ class SQLDatabase:
 
     def __init__(self, engine, dialect: str = ""):
         self._engine = engine
-        self.dialect = dialect or str(engine.url.get_dialect())
+        self.dialect = (
+            dialect or getattr(engine.dialect, "name", "") or str(engine.url.get_dialect())
+        )
 
     @staticmethod
     def get_sql_engine(
@@ -62,12 +64,13 @@ class SQLDatabase:
         schemas = inspector.get_schema_names()
         tables = []
         for schema in schemas:
+            is_default_schema = schema in {"public", "main", "temp"}
             tables.extend(
-                f"{schema}.{t}" if schema != "public" else t
+                t if is_default_schema else f"{schema}.{t}"
                 for t in inspector.get_table_names(schema=schema)
             )
             tables.extend(
-                f"{schema}.{v}" if schema != "public" else v
+                v if is_default_schema else f"{schema}.{v}"
                 for v in inspector.get_view_names(schema=schema)
             )
         return tables
