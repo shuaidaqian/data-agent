@@ -1,5 +1,7 @@
 # Data Agent 2.0 深化实施计划
 
+> 历史计划说明：本文记录 2026-08-13 当时的实施计划。当前项目已经继续加入 `sqlglot` SQL AST safety、SQLite business benchmark、QuestionRuntime / AgentState、ToolRegistry 和 RecoveryLoop。最新实现以 `README.md`、`docs/project-highlights.md` 和最新 `docs/iterations/` 记录为准。
+
 创建时间：2026-08-13 00:00:00
 
 ## 目标

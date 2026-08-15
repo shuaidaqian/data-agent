@@ -1,7 +1,9 @@
  # Dataherald 项目架构深度分析
  
- > 分析日期: 2026-07-05
- > 基于: [Dataherald/dataherald](https://github.com/Dataherald/dataherald) — Apache 2.0 开源 NL→SQL 引擎
+> 分析日期: 2026-07-05
+> 基于: [Dataherald/dataherald](https://github.com/Dataherald/dataherald) — Apache 2.0 开源 NL→SQL 引擎
+
+> 当前项目说明：本文是对上游 Dataherald 的历史架构调研，不等同于本仓库最新实现。本仓库当前核心链路以 `README.md`、`sql_agent/runtime/question_runtime.py`、`sql_agent/runtime/state.py`、`sql_agent/runtime/tool_registry.py` 和 `sql_agent/runtime/recovery.py` 为准，已经在 Dataherald 思路基础上加入 QuestionRuntime 状态机、ToolRegistry、RecoveryLoop、Semantic Layer、SQL AST safety、CandidateRanker、Grounded ResultAnalyzer、Visualization 和 Evaluation Benchmark。
  
  ---
  
@@ -97,7 +99,9 @@
  
  ---
  
- ## 四、关键改进方向
+## 四、关键改进方向
+
+> 当前实现状态：以下方向已在本仓库中不同程度落地。最新能力请以 `README.md` 和 `docs/project-highlights.md` 为准；本节保留为最初从 Dataherald 分析中抽出的设计动机。
  
  ### 4.1 Agent 模式升级
  

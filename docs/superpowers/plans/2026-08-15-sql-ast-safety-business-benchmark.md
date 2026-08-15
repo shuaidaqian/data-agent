@@ -1,5 +1,7 @@
 # SQL AST Safety And Business Benchmark Implementation Plan
 
+> 历史计划说明：本文记录 2026-08-15 SQL AST safety 和 business benchmark 的实施计划。当前项目已经在此基础上继续加入 QuestionRuntime / AgentState、ToolRegistry 和 RecoveryLoop。最新实现以 `README.md`、`docs/project-highlights.md` 和最新 `docs/iterations/` 记录为准。
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** 增加基于 `sqlglot` 的 SQL AST 安全校验，并构造可复现的 SQLite 企业经营分析 benchmark 数据集与 40 条评估用例。

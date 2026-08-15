@@ -86,6 +86,10 @@ dimensions: []
     assert body["analysis"]["limitations"]
     assert body["analysis"]["followup_questions"]
     assert body["conversation_id"]
+    assert body["agent_state"]["stage"] == "FINALIZE"
+    assert body["agent_state"]["status"] == "SUCCEEDED"
+    assert body["agent_state"]["recovery_attempts"] == 0
+    assert body["recovery"]["attempted"] is False
     assert body["candidates"]
     assert body["candidates"][0]["sql"] == "SELECT COUNT(*) AS cnt FROM employees"
     assert body["candidates"][0]["status"] == "VALID"
@@ -125,6 +129,48 @@ def test_question_endpoint_returns_404_for_unknown_database(monkeypatch):
         json={"question": "test", "db_connection_id": "missing", "enable_correction": False},
     )
     assert response.status_code == 404
+
+
+def test_question_endpoint_marks_state_failed_when_no_candidate_is_recoverable(
+    monkeypatch, tmp_path
+):
+    db_path = tmp_path / "api_unrecoverable.sqlite"
+    engine = create_engine(f"sqlite:///{db_path}")
+    Base.metadata.create_all(engine)
+
+    monkeypatch.setenv("LLM_BACKEND", "tests.fakes.UnsafeSQLMockLLM")
+    monkeypatch.setenv("STORAGE_BACKEND", "tests.fakes.MemoryStorage")
+    monkeypatch.setenv("VECTOR_BACKEND", "tests.fakes.MemoryVectorStore")
+    monkeypatch.setenv("ENABLE_SELF_CORRECTION", "false")
+    MemoryStorage.reset()
+
+    from sql_agent.api.routes import reset_system
+
+    reset_system()
+    client = TestClient(create_app())
+    created = client.post(
+        "/api/v1/database-connections",
+        json={"alias": "local-sqlite", "connection_uri": f"sqlite:///{db_path}"},
+    )
+
+    response = client.post(
+        "/api/v1/question",
+        json={
+            "question": "删除员工表",
+            "db_connection_id": created.json()["id"],
+            "enable_correction": False,
+            "agent_mode": "react",
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "INVALID"
+    assert body["agent_state"]["stage"] == "FAILED"
+    assert body["agent_state"]["status"] == "FAILED"
+    assert body["recovery"]["attempted"] is True
+    assert body["recovery"]["recovered"] is False
+    assert "没有可恢复候选" in body["error"]
 
 
 def test_question_endpoint_can_use_grounded_llm_result_analyzer(monkeypatch, tmp_path):

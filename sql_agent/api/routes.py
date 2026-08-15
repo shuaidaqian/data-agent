@@ -15,12 +15,10 @@ from pydantic import BaseModel
 
 from sql_agent.core.config import Settings, System
 from sql_agent.core.types import (
-    AgentConfig,
     DatabaseConnection,
     GoldenSQL,
-    LLMConfig,
-    Prompt,
 )
+from sql_agent.runtime.question_runtime import DatabaseConnectionNotFound, QuestionRuntime
 from sql_agent.sql.database import SQLDatabase
 from sql_agent.sql.scanner import SchemaScanner
 from sql_agent.storage.db import StorageBackend
@@ -48,6 +46,8 @@ class SQLResponse(BaseModel):
     sql: str
     status: str
     confidence_score: Optional[float] = None
+    agent_state: Optional[Dict[str, Any]] = None
+    recovery: Optional[Dict[str, Any]] = None
     semantic_plan: Optional[Dict[str, Any]] = None
     result: Optional[Dict[str, Any]] = None
     analysis: Optional[Dict[str, Any]] = None
@@ -114,40 +114,6 @@ def get_conversation_manager(storage: Any):
     return _conversation_manager
 
 
-def create_result_analyzer(system: System, llm: Any):
-    """根据配置创建结果分析器，默认使用稳定的启发式分析。"""
-    from sql_agent.analysis.result_analyzer import HeuristicResultAnalyzer, LLMResultAnalyzer
-
-    if system.settings.result_analyzer == "llm":
-        return LLMResultAnalyzer(llm)
-    return HeuristicResultAnalyzer()
-
-
-def create_semantic_plan(system: System, question: str):
-    """按配置加载语义模型并生成语义查询计划。"""
-    if not system.settings.semantic_model_path:
-        return None, []
-
-    from pathlib import Path
-
-    from sql_agent.semantic.compiler import SemanticSQLCompiler
-    from sql_agent.semantic.planner import SemanticPlanner
-    from sql_agent.semantic.registry import SemanticModelRegistry
-    from sql_agent.semantic.validator import SemanticPlanValidator
-
-    model_path = Path(system.settings.semantic_model_path)
-    if not model_path.exists():
-        return None, []
-
-    registry = SemanticModelRegistry.from_yaml(model_path)
-    plan = SemanticPlanner(registry).plan(question)
-    validation = SemanticPlanValidator(registry).validate(plan)
-    if not validation.valid or not plan.metrics:
-        return plan, []
-    sql = SemanticSQLCompiler(registry).compile(plan)
-    return plan, [sql] if sql else []
-
-
 # ─── 健康检查 ───────────────────────────────────────────
 
 
@@ -167,154 +133,18 @@ async def ask_question(request: QuestionRequest):
     """
     system = create_system()
     try:
-        from sql_agent.agent.agent_selector import AgentSelector
-        from sql_agent.context.base import ContextStore
-        from sql_agent.correction.dail_style import DAILStyleCorrector
-        from sql_agent.eval.evaluator import Evaluator
-        from sql_agent.llm.base import LLMBackend
-        from sql_agent.sql.database import SQLDatabase
-        from sql_agent.sql.scanner import SchemaScanner
-        from sql_agent.storage.db import StorageBackend
-        from sql_agent.storage.vector import VectorBackend
-
-        llm = system.instance(LLMBackend)
-        storage = system.instance(StorageBackend)
-        system.instance(VectorBackend)
-        context_store = system.instance(ContextStore)
-        evaluator = system.instance(Evaluator)
-
-        # 对话管理
-        conv_mgr = get_conversation_manager(storage)
-        conversation = conv_mgr.get_or_create(
-            request.conversation_id,
-            request.db_connection_id,
-        )
-
-        # 创建 Prompt
-        prompt = Prompt(
-            text=request.question,
-            db_connection_id=request.db_connection_id,
-            schemas=request.schemas,
-        )
-
-        # 获取数据库连接和 schema
-        db_conn_data = storage.find_one("db_connections", {"id": request.db_connection_id})
-        if not db_conn_data:
-            raise HTTPException(status_code=404, detail="Database connection not found")
-        db_conn = DatabaseConnection(
-            **{
-                key: value
-                for key, value in db_conn_data.items()
-                if key in DatabaseConnection.__dataclass_fields__
-            }
-        )
-        database = SQLDatabase.get_sql_engine(db_conn)
-        scanner = SchemaScanner(database)
-        table_descriptions = scanner.scan_all_tables(request.db_connection_id)
-
-        # 获取上下文（few-shot 示例 + 管理员指令）
-        few_shot, instructions = context_store.retrieve_context_for_question(prompt)
-        semantic_plan, semantic_candidate_sqls = create_semantic_plan(system, request.question)
-
-        # 选择并运行 Agent
-        agent_config = AgentConfig(
-            mode=request.agent_mode,
-            enable_self_correction=request.enable_correction,
-        )
-        selector = AgentSelector(system, LLMConfig(), agent_config)
-        result = selector.generate_sql(
-            prompt=prompt,
-            database_connection=db_conn,
-            table_descriptions=table_descriptions,
-            conversation=conversation,
-            few_shot_examples=few_shot,
-            instructions=instructions,
-        )
-
-        # 自纠错
-        if request.enable_correction and system.settings.enable_self_correction and result.sql:
-            schema_info = "\n".join(t.table_schema for t in table_descriptions[:5])
-            corrector = DAILStyleCorrector(llm, database, max_rounds=3)
-            corr_result = corrector.correct(
-                question=request.question,
-                sql=result.sql,
-                schema_info=schema_info,
-                error=result.error,
-            )
-            if corr_result.status == "VALID":
-                result.sql = corr_result.sql
-                result.status = "CORRECTED"
-
-        # 提取中间步骤
-        steps = []
-        candidate_step_texts = []
-        for step in getattr(result, "steps", []):
-            candidate_step_texts.extend([step.action_input, step.observation])
-            steps.append(
-                {
-                    "thought": step.thought,
-                    "action": step.action,
-                    "observation": step.observation[:200] if step.observation else "",
-                }
-            )
-
-        # 候选 SQL 排序与执行证据
-        ranked_candidates = []
-        confidence_score = None
-        analysis = None
-        if result.sql:
-            from sql_agent.ranking.generator import CandidateGenerator
-            from sql_agent.ranking.ranker import CandidateRanker
-
-            candidate_sqls = CandidateGenerator.collect(result.sql, candidate_step_texts)
-            candidate_sqls = [*semantic_candidate_sqls, *candidate_sqls]
-            verified_sqls = []
-            try:
-                from sql_agent.feedback.service import FeedbackService
-
-                verified_matches = FeedbackService(storage).retrieve_verified_queries(
-                    request.question,
-                    request.db_connection_id,
-                )
-                verified_sqls = [match.sql for match in verified_matches]
-                candidate_sqls = [match.sql for match in verified_matches] + candidate_sqls
-            except Exception:
-                logger.debug("Verified query retrieval skipped", exc_info=True)
-            ranked_candidates = CandidateRanker(
-                database=database,
-                table_descriptions=table_descriptions,
-                evaluator=evaluator,
-                semantic_plan=semantic_plan,
-                verified_sqls=verified_sqls,
-            ).rank(request.question, candidate_sqls)
-            if ranked_candidates:
-                best_candidate = ranked_candidates[0]
-                result.sql = best_candidate.sql
-                result.status = best_candidate.status
-                confidence_score = best_candidate.score
-                if best_candidate.status == "VALID":
-                    analysis = create_result_analyzer(system, llm).analyze(
-                        request.question,
-                        best_candidate,
-                    )
-            else:
-                confidence_score = evaluator.evaluate(result.sql, request.question)
-
-        # 保存到对话历史
-        conv_mgr.add_turn(conversation, "user", request.question)
-        conv_mgr.add_turn(
-            conversation,
-            "assistant",
-            result.sql or "",
-            sql=result.sql,
-            sql_result=str(steps[:2]),
-        )
+        runtime_result = QuestionRuntime(system, get_conversation_manager).run(request)
+        result = runtime_result.agent_result
+        analysis = runtime_result.analysis
+        semantic_plan = runtime_result.semantic_plan
 
         return SQLResponse(
             answer=analysis.answer if analysis else None,
             sql=result.sql or "",
             status=result.status,
-            confidence_score=confidence_score,
+            confidence_score=runtime_result.confidence_score,
+            agent_state=runtime_result.state.to_dict(),
+            recovery=runtime_result.recovery.to_dict(),
             semantic_plan=semantic_plan.to_dict() if semantic_plan else None,
             result=analysis.result.__dict__ if analysis else None,
             analysis=(
@@ -335,12 +165,14 @@ async def ask_question(request: QuestionRequest):
                 else None
             ),
             visualization=analysis.visualization if analysis else None,
-            conversation_id=conversation.id,
-            intermediate_steps=steps,
-            candidates=[candidate.to_dict() for candidate in ranked_candidates],
+            conversation_id=runtime_result.state.conversation_id,
+            intermediate_steps=runtime_result.intermediate_steps,
+            candidates=[candidate.to_dict() for candidate in runtime_result.ranked_candidates],
             error=result.error,
         )
 
+    except DatabaseConnectionNotFound:
+        raise HTTPException(status_code=404, detail="Database connection not found")
     except HTTPException:
         raise
     except Exception as e:

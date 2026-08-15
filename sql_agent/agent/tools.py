@@ -21,6 +21,7 @@ from sql_agent.core.types import (
     TableDescription,
 )
 from sql_agent.llm.base import LLMBackend
+from sql_agent.runtime.tool_registry import ToolRegistry, ToolSpec
 from sql_agent.security import SQLSafetyValidator
 from sql_agent.sql.database import SQLDatabase
 
@@ -75,61 +76,101 @@ class AgentToolkit:
             table_descriptions=db_scan,
             dialect=self.database.dialect,
         )
+        self.tool_registry = self._build_tool_registry()
 
     def get_tools(self) -> List[ToolDef]:
         """返回可用工具列表"""
-        tools = [
-            ToolDef(
+        return self.tool_registry.as_tool_defs()
+
+    def _build_tool_registry(self) -> ToolRegistry:
+        """声明式注册 Agent 可用工具。"""
+        registry = ToolRegistry()
+        registry.register(
+            ToolSpec(
                 name="SqlDbQuery",
                 description="Execute a SQL query and return results. Input: a well-formed SQL query.",
                 fn=self._execute_query,
-            ),
-            ToolDef(
+                parameters={"query": "只读 SQL 查询语句"},
+                category="sql",
+                permission_scope="database:read",
+                requires_sql_safety=True,
+                timeout_ms=15000,
+            )
+        )
+        registry.register(
+            ToolSpec(
                 name="SystemTime",
                 description="Get current date and time. Use this if the question involves time or date.",
                 fn=self._get_system_time,
-            ),
-            ToolDef(
+                category="system",
+                permission_scope="none",
+            )
+        )
+        registry.register(
+            ToolSpec(
                 name="DbTablesWithRelevanceScores",
                 description="Find tables relevant to the user question using embedding similarity.",
                 fn=self._find_relevant_tables,
-            ),
-            ToolDef(
+                parameters={"user_question": "用户自然语言问题"},
+                category="schema",
+                permission_scope="schema:read",
+            )
+        )
+        registry.register(
+            ToolSpec(
                 name="DbRelevantTablesSchema",
                 description="Get schema (columns, types) for given tables. Input: comma-separated table names.",
                 fn=self._get_table_schema,
-            ),
-            ToolDef(
+                parameters={"table_names": "逗号分隔的表名"},
+                category="schema",
+                permission_scope="schema:read",
+            )
+        )
+        registry.register(
+            ToolSpec(
                 name="DbColumnEntityChecker",
                 description="Check if an entity exists in a column. Input format: table_name -> column_name, entity",
                 fn=self._check_entity,
-            ),
-            ToolDef(
+                parameters={"tool_input": "table_name -> column_name, entity"},
+                category="schema",
+                permission_scope="data:sample_read",
+            )
+        )
+        registry.register(
+            ToolSpec(
                 name="DbRelevantColumnsInfo",
                 description="Get descriptions and sample values for specific columns. Input: table1 -> col1, table1 -> col2",
                 fn=self._get_column_info,
-            ),
-        ]
+                parameters={"column_names": "table -> column 列表"},
+                category="schema",
+                permission_scope="schema:read",
+            )
+        )
 
         if self.few_shot_examples:
-            tools.append(
-                ToolDef(
+            registry.register(
+                ToolSpec(
                     name="FewshotExamplesRetriever",
                     description="Retrieve similar question-SQL pairs as examples. Input: number of examples needed.",
                     fn=self._get_few_shot_examples,
+                    parameters={"number_of_samples": "需要返回的示例数量"},
+                    category="context",
+                    permission_scope="context:read",
                 )
             )
 
         if self.instructions:
-            tools.append(
-                ToolDef(
+            registry.register(
+                ToolSpec(
                     name="GetAdminInstructions",
                     description="Get admin-defined SQL generation rules and instructions.",
                     fn=self._get_instructions,
+                    category="context",
+                    permission_scope="context:read",
                 )
             )
 
-        return tools
+        return registry
 
     def _execute_query(self, query: str, top_k: int = DEFAULT_TOP_K) -> ToolResult:
         """执行 SQL 查询并返回结果"""

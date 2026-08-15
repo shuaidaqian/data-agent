@@ -6,7 +6,7 @@
 
 我重点关注的是它的核心 Engine，也就是用户输入自然语言问题后，系统如何理解数据库 schema、检索上下文、调用 Agent 工具、生成 SQL 并做验证。分析后我发现原始架构里几个值得增强的点：一是 Agent 控制流依赖 LangChain ZeroShotAgent，可控性有限；二是多轮对话能力不强；三是复杂 SQL，尤其是多表 JOIN 和聚合查询容易出错；四是生成后主要做语法验证，缺少执行反馈驱动的自纠错闭环。
 
-因此我抽取核心链路，重构了一个轻量级 SQL Agent / Data Agent 原型。整体链路是：FastAPI 接收问题，构造 Prompt 和 Conversation；SchemaScanner 扫描数据库表、列、主键、外键和样本值；Semantic Layer 命中指标、维度、时间粒度、默认过滤条件和认证状态，生成 SemanticQueryPlan 并编译语义 SQL 候选；ContextRetriever 检索 Golden SQL few-shot 示例和管理员指令；FeedbackService 召回 verified query；AgentSelector 根据问题复杂度选择 ReActAgent 或 PlanSolveAgent；Agent 通过 AgentToolkit 调用查表、取 schema、检查实体值、执行 SQL 等工具；生成 SQL 后再进入 DAIL 或 DIN 风格自纠错；最后 CandidateRanker 对 semantic SQL、verified query 和 Agent SQL 做执行验证、结果形状校验和可解释排序，ResultAnalyzer 基于最优 SQL result 生成 grounded 洞察，VisualizationRecommender 输出 ECharts 可视化资产。
+因此我抽取核心链路，重构了一个轻量级 SQL Agent / Data Agent 原型。整体链路是：FastAPI 接收问题后交给 QuestionRuntime，Runtime 用 AgentState 推进上下文加载、语义规划、SQL 生成、候选排序、失败恢复和结果分析；SchemaScanner 扫描数据库表、列、主键、外键和样本值；Semantic Layer 命中指标、维度、时间粒度、默认过滤条件和认证状态，生成 SemanticQueryPlan 并编译语义 SQL 候选；ContextRetriever 检索 Golden SQL few-shot 示例和管理员指令；FeedbackService 召回 verified query；AgentSelector 根据问题复杂度选择 ReActAgent 或 PlanSolveAgent；Agent 通过 ToolRegistry 注册的 AgentToolkit 工具查表、取 schema、检查实体值、执行 SQL；生成 SQL 后再进入 DAIL 或 DIN 风格自纠错；最后 CandidateRanker 对 semantic SQL、verified query 和 Agent SQL 做执行验证、结果形状校验和可解释排序，RecoveryLoop 在最佳候选失败时选择可执行候选，ResultAnalyzer 基于最终 SQL result 生成 grounded 洞察，VisualizationRecommender 输出 ECharts 可视化资产。
 
 项目里我比较重视可替换架构，所以实现了一个 IoC 容器，LLM、存储、向量库、上下文和评估器都通过接口注入。真实 adapter 可以通过环境变量接入，测试链路用 MockLLM、内存存储和 SQLite benchmark 保证稳定，不需要改业务主链路。
 
@@ -18,22 +18,22 @@
 
 1. 背景：Dataherald 是什么，原始架构如何拆分。
 2. 问题：LangChain Agent 可控性、多轮上下文、复杂 JOIN、自纠错不足。
-3. 总体架构：API -> Semantic Layer -> Context -> Schema -> Agent -> Tools -> Correction -> CandidateRanker -> ResultAnalyzer -> Visualization。
+3. 总体架构：API -> QuestionRuntime / AgentState -> Semantic Layer -> Context -> Schema -> Agent -> ToolRegistry -> Correction -> CandidateRanker -> RecoveryLoop -> ResultAnalyzer -> Visualization。
 4. 数据模型：Prompt、Conversation、TableDescription、SQLGeneration。
 5. IoC：System.instance 如何替换 LLM、Storage、VectorStore。
 6. SchemaScanner：如何扫描主键、外键、样本值、低基数字段。
 7. SchemaLinker：外键图、JOIN 路径、BFS。
 8. ReActAgent：Thought-Action-Observation。
 9. PlanSolveAgent：Plan phase 和 Execute phase。
-10. AgentToolkit：工具列表、schema 白名单、执行验证。
+10. AgentToolkit / ToolRegistry：声明式工具注册、schema 白名单、执行验证。
 11. Context：Golden SQL、管理员指令、多轮历史。
 12. Correction：DIN 语义验证、DAIL 执行反馈。
 13. Semantic Layer 2.0：指标治理、时间粒度、多指标、Join、歧义澄清。
-14. CandidateRanker / ResultAnalyzer / Visualization：可解释决策、grounded 洞察、ECharts 资产。
+14. CandidateRanker / RecoveryLoop / ResultAnalyzer / Visualization：可解释决策、失败恢复、grounded 洞察、ECharts 资产。
 15. Feedback + Evaluation：verified query 生命周期、错误归因、benchmark。
 16. Testing：MockLLM、内存组件、端到端测试、business benchmark、真实 adapter skip 策略。
 17. 风险：SQL 安全、LLM 幻觉、schema 过大、外键缺失、语义模型误维护。
-18. 后续：SQL AST、观测、评测、安全、模型适配。
+18. 后续：观测、权限治理、评测扩展、安全生产化、模型适配。
 
 ## 3. 高频追问与参考答案
 
@@ -43,11 +43,11 @@ Dataherald 是一个比较完整的开源 NL->SQL 项目，包含核心引擎、
 
 ### Q2：你的项目和 Dataherald 最大区别是什么？
 
-最大区别是我把核心 Engine 做了轻量化和 Agent 化重构。原始 Dataherald 更依赖 LangChain ZeroShotAgent，我这里实现了原生 ReActAgent 和 PlanSolveAgent，并加入多轮上下文、Schema Linking、执行反馈自纠错、Semantic Layer 业务语义治理、多候选 SQL 可解释排序、grounded 结果洞察、ECharts 可视化资产和反馈评估闭环。
+最大区别是我把核心 Engine 做了轻量化和 Agent 化重构。原始 Dataherald 更依赖 LangChain ZeroShotAgent，我这里实现了 QuestionRuntime 状态机、原生 ReActAgent、PlanSolveAgent、ToolRegistry 和 RecoveryLoop，并加入多轮上下文、Schema Linking、执行反馈自纠错、Semantic Layer 业务语义治理、多候选 SQL 可解释排序、grounded 结果洞察、ECharts 可视化资产和反馈评估闭环。
 
 ### Q3：为什么不直接用 LangChain Agent？
 
-LangChain 能快速搭建，但对底层 Thought-Action-Observation 循环、工具执行、错误处理和中间步骤控制不够透明。这个项目的目标是学习和验证 NL->SQL Agent 的核心机制，所以我选择自己实现 Agent 控制流，便于调试、测试和面试解释。
+LangChain 能快速搭建，但对底层 Thought-Action-Observation 循环、工具执行、错误处理和中间步骤控制不够透明。这个项目的目标是学习和验证企业 Data Agent 的受控执行链路，所以我选择自己实现 ReAct loop，并把主链路封装到 QuestionRuntime 状态机里，便于调试、测试和面试解释。
 
 ### Q4：ReAct 和 Plan-and-Solve 怎么选？
 
@@ -115,7 +115,7 @@ LLM 本身不知道数据库有哪些表和列。如果直接让它生成 SQL，
 
 ### Q20：如果继续做一个月，你优先做什么？
 
-我会优先做三件事：第一，引入 SQL AST parser，补 alias、CTE、子查询和列级权限校验；第二，接入 Langfuse 或类似工具记录 SemanticPlan、工具调用、候选 SQL、评分证据和结果分析；第三，把 verified query 召回接入 VectorBackend，并建立更真实的企业 benchmark。
+我会优先做三件事：第一，把现有 SQL AST safety 继续升级成行列级权限、查询资源限制和审计策略；第二，接入 Langfuse 或类似工具记录 SemanticPlan、工具调用、候选 SQL、评分证据、RecoveryLoop 决策和结果分析；第三，把 verified query 召回接入更强的语义检索，并建立更真实的企业 benchmark。
 
 ### Q21：Semantic Layer 2.0 解决什么问题？
 

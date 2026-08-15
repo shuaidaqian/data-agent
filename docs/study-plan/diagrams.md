@@ -5,8 +5,9 @@
 ```mermaid
 flowchart TD
     A["用户自然语言问题"] --> B["FastAPI /api/v1/question"]
-    B --> C["QuestionRequest"]
-    C --> D["Prompt + Conversation"]
+    B --> C["QuestionRuntime"]
+    C --> C1["AgentState 状态机"]
+    C1 --> D["Prompt + Conversation"]
     D --> E["加载 DatabaseConnection"]
     E --> F["SQLDatabase"]
     F --> G["SchemaScanner 扫描表结构"]
@@ -23,15 +24,34 @@ flowchart TD
     I --> K["PlanSolveAgent"]
     J --> L["AgentToolkit 工具调用"]
     K --> L
+    L0["ToolRegistry 声明式注册"] --> L
     L --> M["生成 SQL"]
     M --> N["DAIL / DIN 自纠错"]
     S1 --> R["CandidateRanker"]
     V --> R
     N --> R
     R --> R1["执行验证 + 评分拆解 + 结果形状校验"]
-    R1 --> A1["ResultAnalyzer grounded 洞察"]
+    R1 --> RR["RecoveryLoop 失败恢复"]
+    RR --> A1["ResultAnalyzer grounded 洞察"]
     A1 --> Z["VisualizationRecommender ECharts option"]
-    Z --> O["SQLResponse: answer + sql + result + analysis + visualization + candidates"]
+    Z --> O["SQLResponse: answer + sql + result + analysis + visualization + candidates + agent_state + recovery"]
+```
+
+## 1.1 AgentState 状态机
+
+```mermaid
+flowchart LR
+    A["INIT"] --> B["LOAD_CONTEXT"]
+    B --> C["PLAN_QUERY"]
+    C --> D["GENERATE_SQL"]
+    D --> E["RANK_CANDIDATES"]
+    E --> F{"最佳候选可用?"}
+    F -->|是| G["ANALYZE_RESULT"]
+    F -->|否| H["RECOVER"]
+    H --> I{"恢复成功?"}
+    I -->|是| G
+    I -->|否| J["FAILED"]
+    G --> K["FINALIZE"]
 ```
 
 ## 2. ReAct 循环

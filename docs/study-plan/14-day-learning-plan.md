@@ -133,6 +133,7 @@ pytest -q tests/test_core_types.py
 
 ```bash
 pytest -q tests/test_api_e2e.py
+pytest -q tests/test_agent_state.py tests/test_tool_registry.py tests/test_recovery_loop.py
 ```
 
 **必须理解：**
@@ -140,12 +141,14 @@ pytest -q tests/test_api_e2e.py
 - `create_app()` 如何创建 FastAPI 应用。
 - router 如何挂载到 `/api/v1`。
 - `QuestionRequest` 和 `SQLResponse` 的字段含义。
-- `/api/v1/question` 如何串起系统主链路。
+- `/api/v1/question` 如何调用 `QuestionRuntime`，路由层为什么要保持轻量。
+- `AgentState` 如何记录请求阶段、失败状态和恢复次数。
+- `RecoveryLoop` 如何把候选失败转成结构化恢复结果。
 - 数据库连接、Golden SQL、schema 扫描、conversation API 的职责。
 
 **当日产出：**
 
-- 画 `/api/v1/question` 时序图。
+- 画 `/api/v1/question -> QuestionRuntime -> AgentState -> SQLResponse` 时序图。
 - 写 3 分钟口述稿：从 HTTP 请求到 SQLResponse。
 
 **自测问题：**
@@ -165,6 +168,7 @@ pytest -q tests/test_api_e2e.py
 - Golden SQL 添加接口和问题生成接口之间有什么关系？
 - `/database-connections/{id}/scan` 和 `/question` 中的扫描逻辑有什么不同？
 - API 响应中的 `intermediate_steps` 对前端或调试有什么价值？
+- API 响应中的 `agent_state` 和 `recovery` 分别解决什么问题？
 - 为什么 `SQLResponse.error` 不应该直接暴露敏感数据库信息？
 - 如果 API 请求超时，可能卡在哪些模块？
 - 如何给 `/api/v1/question` 增加 trace_id？
@@ -179,7 +183,6 @@ pytest -q tests/test_api_e2e.py
 **阅读：**
 
 - `sql_agent/core/config.py`
-- `.env.example`
 - `tests/test_ioc_registry.py`
 - `tests/fakes.py`
 

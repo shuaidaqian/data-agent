@@ -2,7 +2,7 @@
 
 ## 1. 项目一句话
 
-这是一个基于 Dataherald 架构分析后重构的轻量级 Data Agent / NL->SQL 原型，重点验证 Semantic Layer 业务语义治理、原生 ReAct、Plan-and-Solve、多轮上下文、Schema Linking、执行反馈自纠错、多候选 SQL 可解释排序、grounded 结果洞察、可消费 ECharts 可视化资产和反馈评估闭环。
+这是一个基于 Dataherald 架构分析后重构的轻量级 Data Agent / NL->SQL 原型，重点验证 QuestionRuntime 状态机编排、ToolRegistry 工具治理、RecoveryLoop 失败恢复、Semantic Layer 业务语义治理、原生 ReAct、Plan-and-Solve、多轮上下文、Schema Linking、执行反馈自纠错、多候选 SQL 可解释排序、grounded 结果洞察、可消费 ECharts 可视化资产和反馈评估闭环。
 
 ## 2. 技术栈
 
@@ -24,6 +24,8 @@
 POST /api/v1/question
   -> QuestionRequest
   -> create_system()
+  -> QuestionRuntime.run()
+  -> AgentState: LOAD_CONTEXT / PLAN_QUERY / GENERATE_SQL / RANK_CANDIDATES / RECOVER / ANALYZE_RESULT / FINALIZE
   -> StorageBackend / VectorBackend / LLMBackend
   -> load DatabaseConnection
   -> SQLDatabase
@@ -35,9 +37,10 @@ POST /api/v1/question
   -> ConversationManager.get_or_create()
   -> AgentSelector.generate_sql()
   -> ReActAgent 或 PlanSolveAgent
-  -> AgentToolkit 工具调用
+  -> AgentToolkit 通过 ToolRegistry 调用受控工具
   -> DAILStyleCorrector.correct()
   -> CandidateRanker 执行验证、形状校验、评分拆解
+  -> RecoveryLoop 选择可恢复候选或返回结构化失败
   -> ResultAnalyzer 生成 answer / summary / key_findings
   -> VisualizationRecommender 生成 spec / ECharts option
   -> SQLResponse
@@ -60,6 +63,9 @@ POST /api/v1/question
 | `SemanticQueryPlan` | 语义查询中间表示 | metrics、dimensions、filters、time_grain、clarification_options |
 | `SQLCandidate` | 候选 SQL 决策对象 | score_breakdown、selection_reason、source、result_shape、execution |
 | `AnalysisResult` | 结果分析输出 | answer、summary、key_findings、limitations、visualization |
+| `AgentState` | 一次问答请求状态 | stage、status、recovery_attempts、error |
+| `ToolSpec` | 声明式工具定义 | parameters、permission_scope、requires_sql_safety、timeout_ms |
+| `RecoveryDecision` | 失败恢复结果 | attempted、recovered、reason、selected_candidate |
 
 ## 5. Agent 三件套
 
@@ -109,6 +115,8 @@ Plan Phase -> Execute Phase -> Final SQL
 
 ## 6. AgentToolkit 工具
 
+工具通过 `ToolRegistry` 注册。现有 Agent 仍消费兼容的 `ToolDef`，但工具定义本身已经带上权限、安全和超时元数据。
+
 | 工具 | 输入 | 输出 | 作用 |
 |------|------|------|------|
 | `SqlDbQuery` | SQL | 查询结果或错误 | 执行验证 SQL |
@@ -119,6 +127,15 @@ Plan Phase -> Execute Phase -> Final SQL
 | `DbRelevantColumnsInfo` | 表列列表 | 列描述和样本 | 给 LLM 补列级上下文 |
 | `FewshotExamplesRetriever` | 样本数量 | 问题-SQL 示例 | few-shot 引导 |
 | `GetAdminInstructions` | 空 | 管理员规则 | 注入业务约束 |
+
+## 6.1 Agent Runtime
+
+| 组件 | 职责 | 面试关键词 |
+|------|------|------------|
+| `QuestionRuntime` | 编排一次 `/api/v1/question` 请求 | 路由瘦身、状态机、可测试工作流 |
+| `AgentState` | 保存请求阶段和关键产物 | 不做完整 trace，但能定位阶段和失败状态 |
+| `ToolRegistry` | 声明式注册工具 | 权限范围、安全要求、工具元数据 |
+| `RecoveryLoop` | 候选失败恢复 | 第一候选失败时选择下一个可执行候选 |
 
 ## 7. Schema Linking
 
@@ -175,6 +192,9 @@ sales.product_id -> products.id
 | 集成查询测试 | `tests/test_integration.py` | 验证聚合、子查询、三表 JOIN |
 | Schema 测试 | `tests/test_schema_linking.py`、`tests/test_schema_scanner_samples.py` | 验证 schema 理解能力 |
 | Agent 工具测试 | `tests/test_agent_tools.py` | 验证工具输入输出和白名单 |
+| Runtime 状态机测试 | `tests/test_agent_state.py` | 验证 AgentState 阶段推进和失败状态 |
+| 工具注册测试 | `tests/test_tool_registry.py` | 验证 ToolRegistry 声明式注册和 ToolDef 兼容导出 |
+| 恢复环路测试 | `tests/test_recovery_loop.py` | 验证最佳候选失败时选择可执行候选 |
 | API E2E 测试 | `tests/test_api_e2e.py` | 用 fake 组件测试完整 API 链路 |
 | Semantic 2.0 测试 | `tests/test_semantic_layer_2.py` | 验证指标治理、多指标、时间粒度、Join 和歧义澄清 |
 | Ranking 2.0 测试 | `tests/test_candidate_ranking_2.py` | 验证来源识别、评分拆解、选择理由和结果形状 |

@@ -41,6 +41,11 @@ Dataherald 是一个面向企业数据问答场景的开源 NL->SQL 引擎，原
 FastAPI API
   |
   v
+QuestionRuntime / AgentState
+  |-- 状态机推进
+  |-- 恢复环路
+  |
+  v
 Prompt / Conversation
   |
   v
@@ -61,6 +66,7 @@ AgentSelector
   |
   v
 AgentToolkit
+  |-- ToolRegistry 声明式注册
   |-- 查询相关表
   |-- 获取表结构
   |-- 检查列实体值
@@ -84,26 +90,28 @@ ResultAnalyzer
   |-- 严格 grounded 的 LLM 自然语言分析
   |
   v
-最终答案 + SQL + 执行结果 + 分析证据
+最终答案 + SQL + 执行结果 + 分析证据 + Agent 状态摘要
 ```
 
 完整请求链路可以理解为：
 
 1. `POST /api/v1/question` 接收自然语言问题。
-2. 系统构造 `Prompt` 和 `Conversation`。
-3. `SchemaScanner` 扫描数据库表、列、主键和外键。
-4. 当配置 `SEMANTIC_MODEL_PATH` 时，`SemanticPlanner` 会把问题解析成 `SemanticQueryPlan`，并编译出语义 SQL 候选。
-5. `ContextRetriever` 检索相关 Golden SQL 和管理员指令。
-6. `FeedbackService` 召回历史 verified query，和语义 SQL、Agent SQL 一起进入候选集合。
-7. `AgentSelector` 根据问题复杂度选择 ReAct 或 Plan-and-Solve。
-8. Agent 通过 `AgentToolkit` 调用数据库工具进行观察和验证。
-9. LLM 输出补充 SQL。
-10. `DAILStyleCorrector` 根据执行结果进行迭代修正。
-11. `CandidateRanker` 对候选 SQL 做 schema 校验、执行验证和证据化排序。
-12. API 透出最优候选 SQL 的受控执行结果，包括列名、预览行数、返回行数和截断状态。
-13. `ResultAnalyzer` 基于 SQL 执行结果生成 `answer`、`summary` 和带 evidence 的 `key_findings`。
-14. `VisualizationRecommender` 根据结果形状生成 metric card、bar、line、table 或 pie 建议，并返回可直接消费的 ECharts option、字段校验结果和 finding 适配信息。
-15. API 返回最终答案、SemanticQueryPlan、SQL、执行结果、分析证据、图表建议、中间步骤、候选证据和错误信息。
+2. `QuestionRuntime` 创建 `AgentState`，将一次问答推进为 `LOAD_CONTEXT`、`PLAN_QUERY`、`GENERATE_SQL`、`RANK_CANDIDATES`、`RECOVER`、`ANALYZE_RESULT` 和 `FINALIZE` 等阶段。
+3. 系统构造 `Prompt` 和 `Conversation`。
+4. `SchemaScanner` 扫描数据库表、列、主键和外键。
+5. 当配置 `SEMANTIC_MODEL_PATH` 时，`SemanticPlanner` 会把问题解析成 `SemanticQueryPlan`，并编译出语义 SQL 候选。
+6. `ContextRetriever` 检索相关 Golden SQL 和管理员指令。
+7. `FeedbackService` 召回历史 verified query，和语义 SQL、Agent SQL 一起进入候选集合。
+8. `AgentSelector` 根据问题复杂度选择 ReAct 或 Plan-and-Solve。
+9. Agent 通过 `AgentToolkit` 调用数据库工具进行观察和验证；工具由 `ToolRegistry` 声明式注册，保留权限范围、安全要求和超时等元数据。
+10. LLM 输出补充 SQL。
+11. `DAILStyleCorrector` 根据执行结果进行迭代修正。
+12. `CandidateRanker` 对候选 SQL 做 schema 校验、执行验证和证据化排序。
+13. `RecoveryLoop` 在最佳候选失败时尝试选择下一个可执行候选，避免直接返回失败 SQL。
+14. API 透出最优候选 SQL 的受控执行结果，包括列名、预览行数、返回行数和截断状态。
+15. `ResultAnalyzer` 基于 SQL 执行结果生成 `answer`、`summary` 和带 evidence 的 `key_findings`。
+16. `VisualizationRecommender` 根据结果形状生成 metric card、bar、line、table 或 pie 建议，并返回可直接消费的 ECharts option、字段校验结果和 finding 适配信息。
+17. API 返回最终答案、SemanticQueryPlan、SQL、执行结果、分析证据、图表建议、中间步骤、候选证据、`agent_state`、`recovery` 和错误信息。
 
 ## 项目结构
 
@@ -112,6 +120,7 @@ sql_agent/
 ├── core/          # 数据模型、配置管理、IoC 容器
 ├── llm/           # LLM 抽象层，支持真实 LLM adapter 和测试用 MockLLM
 ├── agent/         # Agent 框架，包括 ReAct、Plan-and-Solve 和自动选择器
+├── runtime/       # AgentState 状态机、ToolRegistry、RecoveryLoop 和 QuestionRuntime
 ├── context/       # 上下文管理，包括多轮对话、few-shot 检索和管理员指令
 ├── sql/           # 数据库层，包括 SQL 执行、Schema 扫描、Schema Linking、复杂 SQL 分解
 ├── correction/    # SQL 自纠错模块，包括 DIN-SQL 和 DAIL-SQL 风格修正器
@@ -214,6 +223,22 @@ services/          # Dataherald 原始多服务参考实现或源码镜像
 
 复杂度判断基于关键词、时间序列表达、JOIN/聚合意图和表数量等启发式规则。
 
+#### QuestionRuntime 与 AgentState
+
+`QuestionRuntime` 将 `/api/v1/question` 的一次请求封装为可追踪状态机，而不是把所有编排逻辑堆在路由函数中。
+
+当前阶段包括：
+
+- `LOAD_CONTEXT`：加载会话、数据库连接、schema 和上下文。
+- `PLAN_QUERY`：生成 SemanticQueryPlan 和语义 SQL 候选。
+- `GENERATE_SQL`：调用 ReAct 或 Plan-and-Solve 生成 SQL。
+- `RANK_CANDIDATES`：执行候选 SQL 并基于证据排序。
+- `RECOVER`：当最佳候选失败时选择下一个可执行候选。
+- `ANALYZE_RESULT`：基于最终候选的执行结果生成 grounded 分析。
+- `FINALIZE` / `FAILED`：输出状态摘要或结构化错误。
+
+API 会返回轻量 `agent_state` 和 `recovery` 字段，方便判断一次问答停在哪个阶段、是否发生恢复、恢复是否成功。这里没有引入完整 trace，避免暴露过多推理细节；后续如果需要 checkpoint、human-in-the-loop 或更复杂图编排，可以将这些 Runtime 节点映射到 LangGraph。
+
 ### 5. Agent 工具层
 
 `AgentToolkit` 将数据库能力封装为 Agent 可调用工具，包括：
@@ -226,6 +251,8 @@ services/          # Dataherald 原始多服务参考实现或源码镜像
 - `DbRelevantColumnsInfo`：获取列描述、枚举值和样本值。
 - `FewshotExamplesRetriever`：获取相似 Golden SQL 示例。
 - `GetAdminInstructions`：获取管理员指令。
+
+工具由 `ToolRegistry` 声明式注册，每个 `ToolSpec` 都可以携带工具分类、权限范围、是否要求 SQL 安全校验、超时时间和参数说明。现有 Agent 仍通过兼容的 `ToolDef` 使用工具，但工具定义不再散落在硬编码列表中。
 
 这层体现了 Agent 的一个关键思想：LLM 不直接访问数据库，而是通过受控工具获取环境信息。当前工具层已经接入基于 `sqlglot` 的 AST 安全校验，表名和列名必须来自 `SchemaScanner` 扫描得到的 `TableDescription`；`SqlDbQuery` 在执行前会拒绝非 SELECT、多语句、未知表、未知列、歧义未限定列、受策略限制的 `SELECT *` 和危险函数。相比旧的字符串/regex 校验，AST 校验可以正确处理 alias、JOIN、CTE 和子查询作用域。
 
@@ -382,7 +409,7 @@ Feedback 2.0 增强了结构化学习信号：
 | 方法 | 路径 | 说明 |
 |------|------|------|
 | `GET` | `/api/v1/health` | 健康检查 |
-| `POST` | `/api/v1/question` | 自然语言数据问答，返回答案、SQL、执行结果、grounded 分析、候选证据，并支持多轮对话和自纠错 |
+| `POST` | `/api/v1/question` | 自然语言数据问答，返回答案、SQL、执行结果、grounded 分析、候选证据、Agent 状态和恢复摘要，并支持多轮对话和自纠错 |
 | `POST` | `/api/v1/golden-sqls` | 添加 Golden SQL 示例 |
 | `GET` | `/api/v1/golden-sqls` | 查询 Golden SQL 示例 |
 | `POST` | `/api/v1/feedback` | 提交查询反馈，corrected SQL 会沉淀为 verified query |
@@ -427,6 +454,7 @@ pytest -q tests
 - Schema Linking 和 JOIN 路径发现。
 - ConversationManager 多轮上下文构造。
 - FastAPI `/api/v1/question` + SQLite + MockLLM 端到端链路。
+- AgentState 状态机、ToolRegistry 声明式工具注册和 RecoveryLoop 恢复环路。
 - 候选 SQL 执行验证、证据化评分和排序。
 - 最优候选执行结果 API 透出。
 - 启发式 ResultAnalyzer 和严格 grounded 的 LLMResultAnalyzer。
@@ -475,14 +503,17 @@ pytest -q
 
 可以将该项目概括为：
 
-> 我分析了开源 NL->SQL 项目 Dataherald 的架构，发现其核心链路依赖 LangChain ZeroShotAgent，每次查询相对独立，对复杂 SQL 和自纠错支持有限。因此我抽取核心 NL->SQL 引擎，重构了一个轻量级 SQL Agent 原型，实现了原生 ReAct、Plan-and-Solve、多轮对话管理、Schema Linking 和执行反馈自纠错。
+> 我分析了开源 NL->SQL 项目 Dataherald 的架构，发现其核心链路依赖 LangChain ZeroShotAgent，每次查询相对独立，对复杂 SQL 和自纠错支持有限。因此我抽取核心 NL->SQL 引擎，重构了一个轻量级 SQL Agent 原型，实现了 QuestionRuntime 状态机、ToolRegistry 工具治理、RecoveryLoop 失败恢复、原生 ReAct、Plan-and-Solve、多轮对话管理、Schema Linking 和执行反馈自纠错。
 
 面试时可以重点讲四个技术点：
 
 1. **Agent 控制流重构**
    - 不直接依赖 LangChain Agent。
+   - 用 `QuestionRuntime` 和 `AgentState` 管理一次问答生命周期。
+   - 用 `ToolRegistry` 声明式注册工具能力。
    - 自己实现 Thought-Action-Observation 循环。
    - 支持按复杂度自动选择 ReAct 或 Plan-and-Solve。
+   - 用 `RecoveryLoop` 在候选失败时基于执行证据选择替代 SQL。
 
 2. **Schema 理解增强**
    - 使用 SQLAlchemy inspector 扫描表、列、主键和外键。
@@ -519,7 +550,7 @@ pytest -q
 
 更稳妥的项目表述：
 
-> 这是一个基于 Dataherald 架构分析后实现的下一代 NL->SQL Agent 原型，重点验证 Agent 控制流、Schema Linking、多轮上下文和执行反馈自纠错几个关键技术点。
+> 这是一个基于 Dataherald 架构分析后实现的下一代 NL->SQL Agent 原型，重点验证 QuestionRuntime 状态机、ToolRegistry 工具治理、RecoveryLoop 失败恢复、Schema Linking、多轮上下文和执行反馈自纠错几个关键技术点。
 
 不建议表述为：
 
@@ -530,17 +561,18 @@ pytest -q
 ## 推荐学习顺序
 
 1. 阅读 `sql_agent/core/types.py`，理解系统中的核心数据对象。
-2. 阅读 `sql_agent/sql/database.py` 和 `sql_agent/sql/scanner.py`，理解 SQL 执行和 Schema 来源。
-3. 阅读 `sql_agent/agent/tools.py`，理解 Agent 如何通过工具观察数据库。
-4. 阅读 `sql_agent/agent/react_agent.py`，理解原生 ReAct 推理循环。
-5. 阅读 `sql_agent/agent/plan_solve_agent.py`，理解复杂 SQL 的先规划再执行。
-6. 阅读 `sql_agent/sql/schema_linking.py`，理解 JOIN 路径发现。
-7. 阅读 `sql_agent/context/conversation.py`，理解多轮上下文如何构造。
-8. 阅读 `sql_agent/correction/dail_style.py`，理解执行反馈驱动的 SQL 修正闭环。
-9. 阅读 `sql_agent/ranking/ranker.py`，理解候选 SQL 如何基于执行证据排序。
-10. 阅读 `sql_agent/analysis/result_analyzer.py`，理解系统如何把 SQL result 转成稳定、可追溯的自然语言答案。
-11. 阅读 `sql_agent/semantic/`，理解 Semantic Layer 如何把业务口径变成可校验计划。
-12. 阅读 `sql_agent/feedback/` 和 `sql_agent/eval/harness.py`，理解反馈学习和离线评估闭环。
+2. 阅读 `sql_agent/runtime/question_runtime.py`、`state.py` 和 `recovery.py`，理解主链路状态机和失败恢复。
+3. 阅读 `sql_agent/sql/database.py` 和 `sql_agent/sql/scanner.py`，理解 SQL 执行和 Schema 来源。
+4. 阅读 `sql_agent/agent/tools.py` 和 `sql_agent/runtime/tool_registry.py`，理解 Agent 如何通过声明式注册工具观察数据库。
+5. 阅读 `sql_agent/agent/react_agent.py`，理解原生 ReAct 推理循环。
+6. 阅读 `sql_agent/agent/plan_solve_agent.py`，理解复杂 SQL 的先规划再执行。
+7. 阅读 `sql_agent/sql/schema_linking.py`，理解 JOIN 路径发现。
+8. 阅读 `sql_agent/context/conversation.py`，理解多轮上下文如何构造。
+9. 阅读 `sql_agent/correction/dail_style.py`，理解执行反馈驱动的 SQL 修正闭环。
+10. 阅读 `sql_agent/semantic/`，理解 Semantic Layer 如何把业务口径变成可校验计划。
+11. 阅读 `sql_agent/ranking/ranker.py`，理解候选 SQL 如何基于执行证据排序。
+12. 阅读 `sql_agent/analysis/result_analyzer.py`，理解系统如何把 SQL result 转成稳定、可追溯的自然语言答案。
+13. 阅读 `sql_agent/feedback/` 和 `sql_agent/eval/harness.py`，理解反馈学习和离线评估闭环。
 
 ## 后续开发计划
 
@@ -574,16 +606,21 @@ pytest -q
 - [x] 增加图表推荐和可视化 spec 输出，让结果分析进一步从文本答案扩展到可展示洞察。
 - [x] 增加基于 `sqlglot` 的 SQL AST 安全校验，覆盖 alias、CTE、子查询、未知表/列、歧义列和多语句拦截。
 - [x] 增加 SQLite business benchmark 数据集、业务语义模型和 40 条业务评估样例。
+- [x] 增加 `AgentState` 和 `QuestionRuntime`，将一次问答编排为可追踪状态机。
+- [x] 增加 `ToolRegistry`，将 Agent 工具改为声明式注册并保留权限/安全元数据。
+- [x] 增加 `RecoveryLoop`，在最佳候选失败时基于执行证据选择可恢复 SQL。
 - [ ] 继续强化 AST 安全策略的数据库方言覆盖、行列权限和查询资源限制。
 - [ ] 接入 Langfuse / LangSmith 做 Agent 推理链路追踪。
 - [ ] 接入 Prometheus / Grafana 做服务监控。
-- [ ] 适配真实模型或本地模型后端。
+- [ ] 扩展本地模型后端和更多 LLM provider。
 - [ ] 支持更细粒度的权限控制和审计日志。
 
 ## 设计原则
 
 - **模块可替换**：LLM、存储、向量库、评估器等组件通过接口隔离。
 - **Agent 可控**：用原生 ReAct 和 Plan-and-Solve 控制推理流程，而不是完全依赖框架黑盒。
+- **Runtime 清晰**：用 `QuestionRuntime`、`AgentState` 和 `RecoveryLoop` 管理一次问答生命周期，路由层只做 HTTP 适配。
+- **工具受控**：用 `ToolRegistry` 声明式注册工具，保留权限、安全和参数元数据。
 - **Schema 优先**：先理解数据库结构，再让 LLM 生成 SQL。
 - **执行闭环**：生成 SQL 后通过数据库执行反馈进行修正。
 - **答案可追溯**：最终自然语言答案只能来自系统执行 SQL 得到的受控结果，SQL 和 evidence 保留为审计依据。

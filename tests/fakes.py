@@ -126,3 +126,14 @@ class MockLLM(LLMBackend):
 
     def count_tokens(self, text: str) -> int:
         return len(text.split())
+
+
+class UnsafeSQLMockLLM(MockLLM):
+    def generate(
+        self,
+        messages: List[Dict[str, str]],
+        config: Optional[Any] = None,
+        **kwargs: Any,
+    ) -> str:
+        self.calls += 1
+        return "```sql\nDELETE FROM employees\n```"

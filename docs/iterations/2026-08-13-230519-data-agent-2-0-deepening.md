@@ -1,5 +1,7 @@
 # Data Agent 2.0 深化迭代记录
 
+> 历史记录说明：本文记录 2026-08-13 当次迭代状态，文中“SQL AST 仍为后续方向”等表述是当时事实。当前项目已经在 2026-08-15 迭代引入 `sqlglot` SQL AST safety、SQLite business benchmark、QuestionRuntime / AgentState、ToolRegistry 和 RecoveryLoop；最新状态以 `README.md`、`docs/project-highlights.md` 和最新迭代记录为准。
+
 时间：2026-08-13 23:05:19
 
 ## 本次目标
@@ -214,7 +216,7 @@ pytest tests\test_api_e2e.py -q
 
 ## 当前边界
 
-1. 没有 SQL AST 级解析，alias、CTE、子查询列级权限仍是后续方向。
+1. 当时尚未引入 SQL AST 级解析，alias、CTE、子查询列级权限在该迭代中仍是后续方向。
 2. Semantic planner 仍是启发式，不是 LLM semantic parser。
 3. Join 编译仅支持 semantic model 中声明的一跳关系。
 4. verified query 生命周期没有人工审核 UI。
@@ -244,7 +246,7 @@ pytest tests\test_api_e2e.py -q
 
 下一阶段最有价值的方向：
 
-1. 引入 SQL AST parser，做 alias、CTE、子查询和列级权限校验。
+1. 后续引入 SQL AST parser，做 alias、CTE、子查询和列级权限校验；该方向已在 2026-08-15 迭代落地为 `sqlglot` AST safety。
 2. 做 semantic model 管理 API 和审核流。
 3. verified query 召回接 VectorBackend，从 token overlap 升级到语义召回。
 4. 增加前端结果页，展示 answer、SQL、evidence、candidate decision 和 ECharts 图表。

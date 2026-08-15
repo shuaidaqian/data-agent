@@ -27,7 +27,7 @@
 
 更安全、也更像实习生真实经历的说法是：
 
-> 在神州数码实习期间，我参与了一个面向企业数据库问答的 Data Agent 原型项目，目标是降低业务人员写 SQL 和理解查询结果的门槛。我主要负责核心 NL-to-SQL / NL-to-data-answer Agent 链路的设计与实现，包括 Semantic Layer 业务语义治理、Schema 扫描、Agent 工具调用、多轮上下文、SQL 自纠错、候选 SQL 执行验证与可解释排序、基于执行结果的 grounded 洞察和 ECharts 可视化资产生成。项目以原型验证和内部 PoC 为主，使用 SQLite benchmark 和 MockLLM 保证本地可复现，同时保留真实 adapter 接入能力。
+> 在神州数码实习期间，我参与了一个面向企业数据库问答的 Data Agent 原型项目，目标是降低业务人员写 SQL 和理解查询结果的门槛。我主要负责核心 NL-to-SQL / NL-to-data-answer Agent 链路的设计与实现，包括 QuestionRuntime 状态机编排、Tool Registry 工具治理、Recovery Loop 失败恢复、Semantic Layer 业务语义治理、Schema 扫描、Agent 工具调用、多轮上下文、SQL 自纠错、候选 SQL 执行验证与可解释排序、基于执行结果的 grounded 洞察和 ECharts 可视化资产生成。项目以原型验证和内部 PoC 为主，使用 SQLite benchmark 和 MockLLM 保证本地可复现，同时保留真实 adapter 接入能力。
 
 这样讲的好处：
 
@@ -40,7 +40,7 @@
 
 这个项目可以定位为：
 
-> 一个参考 Dataherald 架构并结合 Data Agent 思路重构的轻量级企业数据问答 Agent 系统。它不是简单让 LLM 一次性生成 SQL，而是把 Semantic Layer 2.0、SemanticQueryPlan、数据库环境感知、工具调用、Schema Linking、多轮记忆、执行反馈自纠错、SQL AST 安全校验、候选 SQL 可解释排序、grounded 结果洞察、反馈学习、ECharts 可视化资产和可复现业务 Evaluation Benchmark 串成一个可测试的工程闭环。
+> 一个参考 Dataherald 架构并结合 Data Agent 思路重构的轻量级企业数据问答 Agent 系统。它不是简单让 LLM 一次性生成 SQL，而是把 QuestionRuntime 状态机、Tool Registry、Recovery Loop、Semantic Layer 2.0、SemanticQueryPlan、数据库环境感知、工具调用、Schema Linking、多轮记忆、执行反馈自纠错、SQL AST 安全校验、候选 SQL 可解释排序、grounded 结果洞察、反馈学习、ECharts 可视化资产和可复现业务 Evaluation Benchmark 串成一个可测试的工程闭环。
 
 更面试化的版本：
 
@@ -53,6 +53,7 @@
 ```text
 用户问题
 -> FastAPI /api/v1/question
+-> QuestionRuntime 创建 AgentState
 -> Prompt + Conversation
 -> 从存储加载 DatabaseConnection
 -> SQLAlchemy 连接数据库
@@ -62,21 +63,22 @@
 -> ContextStore 检索 few-shot 和管理员指令
 -> FeedbackService 召回 verified query
 -> AgentSelector 选择 ReAct 或 PlanSolve
--> AgentToolkit 调用工具观察数据库
+-> AgentToolkit 通过 ToolRegistry 调用受控工具观察数据库
 -> SQLSafetyValidator 做 AST 表/列白名单和只读校验
 -> LLM 生成 SQL
 -> DAIL/DIN 自纠错
 -> CandidateRanker 做 AST safety、执行验证和排序
--> VisualizationRecommender 生成 ECharts 可视化资产
+-> RecoveryLoop 在最佳候选失败时选择可恢复候选
 -> ResultAnalyzer 基于最优候选执行结果生成 answer/summary/key_findings
--> API 返回最终 answer + SQL + result + analysis + candidates 证据
+-> VisualizationRecommender 生成 ECharts 可视化资产
+-> API 返回 answer + SQL + result + analysis + visualization + candidates + agent_state + recovery
 ```
 
 ## 2 分钟项目故事
 
 你要能在 2 分钟内讲清楚：
 
-> 这个项目是为了解决企业内部业务人员不会写 SQL，但又需要查数和理解结果的问题。传统方案要么依赖数据分析师手写 SQL，要么 BI 报表不够灵活。我们做的是一个轻量级企业数据问答 Agent：用户输入自然语言问题后，系统先通过 Semantic Layer 命中业务指标、维度、同义词、默认过滤条件、时间粒度和认证状态，生成可解释的 SemanticQueryPlan，再编译成 SQL 候选；同时系统会结合 verified query 和 Agent 生成的 SQL，统一做 SQL AST 安全校验、执行验证、结果形状校验和候选排序。最后，系统把最优候选的执行结果透出给 API，基于 SQL result evidence 生成答案、洞察和 ECharts 图表建议。用户反馈如果包含修正 SQL，还会沉淀成带生命周期的 verified query，后续类似问题可以复用；离线侧用 SQLite business benchmark 验证业务 SQL 口径和安全场景。
+> 这个项目是为了解决企业内部业务人员不会写 SQL，但又需要查数和理解结果的问题。传统方案要么依赖数据分析师手写 SQL，要么 BI 报表不够灵活。我们做的是一个轻量级企业数据问答 Agent：用户输入自然语言问题后，QuestionRuntime 会把一次请求推进成 AgentState 状态机，依次完成上下文加载、语义规划、SQL 生成、候选排序、失败恢复和结果分析。系统先通过 Semantic Layer 命中业务指标、维度、同义词、默认过滤条件、时间粒度和认证状态，生成可解释的 SemanticQueryPlan，再编译成 SQL 候选；同时结合 verified query 和 Agent 生成的 SQL，统一做 SQL AST 安全校验、执行验证、结果形状校验和候选排序。如果最佳候选失败，RecoveryLoop 会选择后续可执行候选；最后系统把最终候选的执行结果透出给 API，基于 SQL result evidence 生成答案、洞察和 ECharts 图表建议。用户反馈如果包含修正 SQL，还会沉淀成带生命周期的 verified query；离线侧用 SQLite business benchmark 验证业务 SQL 口径和安全场景。
 
 ## 推荐阅读顺序
 
@@ -98,17 +100,23 @@
 文件：
 
 - `sql_agent/api/routes.py`
+- `sql_agent/runtime/question_runtime.py`
+- `sql_agent/runtime/state.py`
+- `sql_agent/runtime/recovery.py`
 
 重点看 `/api/v1/question`：
 
 - 请求体有哪些字段。
 - 如何创建 `System`。
+- 路由如何调用 `QuestionRuntime`。
+- `AgentState` 如何记录 `LOAD_CONTEXT`、`PLAN_QUERY`、`GENERATE_SQL`、`RANK_CANDIDATES`、`RECOVER`、`ANALYZE_RESULT`、`FINALIZE` 和 `FAILED`。
 - 如何从 storage 取数据库连接。
 - 如何创建 `Prompt` 和 `Conversation`。
 - 如何扫描 schema。
 - 如何调用 Agent。
 - 如何做 correction。
 - 如何做 candidate ranking。
+- 如何在候选不可恢复时返回结构化失败状态。
 - 返回结果包含什么。
 
 ### 3. 核心数据模型
@@ -161,6 +169,7 @@
 文件：
 
 - `sql_agent/agent/tools.py`
+- `sql_agent/runtime/tool_registry.py`
 
 重点：
 
@@ -169,6 +178,8 @@
 - `DbRelevantTablesSchema`
 - `DbColumnEntityChecker`
 - `DbRelevantColumnsInfo`
+- `ToolRegistry` 如何声明式注册工具。
+- `ToolSpec` 如何保留权限范围、安全要求、超时和参数说明。
 - schema 白名单怎么做。
 - `SQLSafetyValidator` 如何用 `sqlglot` AST 拦截非 SELECT、多语句、未知表、未知列、歧义列和危险函数。
 
@@ -341,6 +352,9 @@ DROP TABLE employees
 测试就是项目说明书。重点看：
 
 - `tests/test_api_e2e.py`：API 端到端。
+- `tests/test_agent_state.py`：AgentState 状态机。
+- `tests/test_tool_registry.py`：声明式工具注册。
+- `tests/test_recovery_loop.py`：失败恢复策略。
 - `tests/test_semantic_layer.py`：Semantic Layer 和 SemanticQueryPlan。
 - `tests/test_candidate_ranking.py`：候选 SQL 排序。
 - `tests/test_result_analysis.py`：结果分析、grounded evidence 和 LLM 回退。
@@ -468,14 +482,17 @@ python -m compileall -q sql_agent tests main.py
 
 > 我主要负责核心 Agent 链路和可靠性增强，包括：
 >
-> 1. SchemaScanner 和列级上下文增强。
-> 2. AgentToolkit 工具封装和 SQL AST 安全校验。
-> 3. ReAct / Plan-and-Solve Agent 调用链路。
-> 4. ConversationManager 多轮上下文接入。
-> 5. DAIL/DIN 风格 SQL 自纠错。
-> 6. CandidateRanker 候选 SQL 执行验证和可解释排序。
-> 7. ResultAnalyzer 基于 SQL result 的稳定回答和 LLM grounded 回退。
-> 8. FastAPI `/api/v1/question` 端到端接口和 SQLite + MockLLM 测试。
+> 1. QuestionRuntime 和 AgentState 状态机编排。
+> 2. ToolRegistry 声明式工具注册和 AgentToolkit 工具封装。
+> 3. SchemaScanner 和列级上下文增强。
+> 4. SQL AST 安全校验。
+> 5. ReAct / Plan-and-Solve Agent 调用链路。
+> 6. ConversationManager 多轮上下文接入。
+> 7. DAIL/DIN 风格 SQL 自纠错。
+> 8. CandidateRanker 候选 SQL 执行验证和可解释排序。
+> 9. RecoveryLoop 基于执行证据做失败恢复。
+> 10. ResultAnalyzer 基于 SQL result 的稳定回答和 LLM grounded 回退。
+> 11. FastAPI `/api/v1/question` 端到端接口和 SQLite + MockLLM 测试。
 
 如果担心“说太多像一个人做完整项目”，可以改成：
 
@@ -487,7 +504,13 @@ python -m compileall -q sql_agent tests main.py
 
 回答：
 
-> LangChain 快速搭 demo 很方便，但黑盒程度高，中间步骤、工具调用约束、错误处理和安全控制不够细。这个项目希望验证企业场景下可控的 NL-to-SQL 链路，所以我自己实现了 ReAct loop，把每次 Thought、Action、Observation 都显式记录下来，也能在工具层做 schema 白名单和 SQL 安全拦截。
+> LangChain 快速搭 demo 很方便，但黑盒程度高，中间步骤、工具调用约束、错误处理和安全控制不够细。这个项目希望验证企业场景下可控的 NL-to-SQL 链路，所以我自己实现了 ReAct loop，并把主链路收敛到 QuestionRuntime 状态机里。这样工具调用、候选排序、失败恢复和结果分析都能被显式测试，也能在工具层做 schema 白名单和 SQL 安全拦截。
+
+### 1.1 为什么用了状态机但没有直接上 LangGraph？
+
+回答：
+
+> 当前项目是企业 Data Agent 的确定性主链路，核心复杂度在业务语义、SQL 安全、执行验证和 grounded answer，而不是开放式多 Agent 图编排。所以我先抽象了框架无关的 AgentState、QuestionRuntime、ToolRegistry 和 RecoveryLoop。后续如果出现 checkpoint、human-in-the-loop、异步长任务或复杂条件图，再把这些 Runtime node 映射到 LangGraph 会更自然；现在直接引入 LangGraph 容易变成框架套壳。
 
 ### 2. 为什么要 SchemaScanner？
 
@@ -518,6 +541,12 @@ python -m compileall -q sql_agent tests main.py
 回答：
 
 > 普通 NL-to-SQL 往往直接返回 LLM 第一条 SQL，但 LLM 可能格式对、语义错。我加入 CandidateRanker，把候选 SQL 逐个做 schema 校验、危险命令拦截、真实执行、结果形状校验和证据收集，然后基于执行结果、问题意图、verified query 命中、semantic plan 匹配和 Evaluator 分数排序。API 会返回 `score_breakdown`、`selection_reason` 和 `candidates`，所以系统选择过程是透明的；同时最优候选的执行结果会进入 `result`，成为最终 `answer` 和 `analysis` 的证据源。
+
+### 6.1 RecoveryLoop 解决什么问题？
+
+回答：
+
+> 它解决“第一名候选不可用时系统是否直接失败”的问题。CandidateRanker 会给每条候选留下安全和执行证据；RecoveryLoop 根据这些证据，如果最佳候选失败，就选择后续第一个真实执行成功的候选。如果全部失败，API 不会 500，而是返回 `agent_state.status=FAILED`、`recovery.recovered=false` 和明确错误原因。这体现了 Agent 的基本闭环：观察失败，再选择替代动作。
 
 ### 7. 为什么不只返回 SQL？
 
@@ -599,6 +628,12 @@ python -m compileall -q sql_agent tests main.py
 
 > IoC 方便在接口层替换真实模型、本地模型、内存存储或其他持久化/向量后端。业务代码依赖接口而不是具体 SDK，测试时用 MockLLM 和内存存储稳定复现，真实运行时通过环境变量切换 adapter。
 
+### 15.1 ToolRegistry 比硬编码工具列表好在哪里？
+
+回答：
+
+> 硬编码工具列表只能告诉 Agent 有哪些函数。ToolRegistry 会把工具定义成 ToolSpec，除了名称和函数，还包含参数说明、权限范围、是否需要 SQL 安全校验、工具分类和超时配置。这样后续可以接权限治理、审计、工具 UI、灰度开关，也能让 Agent 工具层更像生产系统里的受控能力集合。
+
 ### 16. 这个项目上线需要做什么？
 
 回答：
@@ -608,7 +643,7 @@ python -m compileall -q sql_agent tests main.py
 > 1. 只读数据库账号。
 > 2. SQL AST 权限审计从原型安全校验继续升级到行列级权限、资源限制和审计日志。
 > 3. 查询超时和行数限制。
-> 4. Agent trace。
+> 4. Agent trace / Langfuse 或 LangSmith 观测。
 > 5. 用户权限和库表权限。
 > 6. 真实评测集。
 > 7. 缓存和限流。
@@ -619,7 +654,7 @@ python -m compileall -q sql_agent tests main.py
 
 可以直接放简历：
 
-> 基于 Dataherald 架构重构企业数据问答 Agent 原型，实现 Semantic Layer 2.0 与 SemanticQueryPlan 中间表示、原生 ReAct / Plan-and-Solve 双 Agent 路由、Schema Scanner/Linking、多轮会话记忆、DIN/DAIL 风格执行反馈自纠错、sqlglot AST 安全校验、多候选 SQL 执行验证与可解释排序、grounded 结果洞察、Feedback verified query 生命周期、可消费 ECharts 可视化资产和离线 Evaluation Benchmark。系统提供 FastAPI 接口，使用 SQLite + MockLLM 完成端到端测试，并构造 40 条 business benchmark 验证业务语义、趋势分析、可视化和安全场景。
+> 基于 Dataherald 架构重构企业数据问答 Agent 原型，实现 QuestionRuntime / AgentState 状态机编排、ToolRegistry 声明式工具治理、RecoveryLoop 失败恢复、Semantic Layer 2.0 与 SemanticQueryPlan 中间表示、原生 ReAct / Plan-and-Solve 双 Agent 路由、Schema Scanner/Linking、多轮会话记忆、DIN/DAIL 风格执行反馈自纠错、sqlglot AST 安全校验、多候选 SQL 执行验证与可解释排序、grounded 结果洞察、Feedback verified query 生命周期、可消费 ECharts 可视化资产和离线 Evaluation Benchmark。系统提供 FastAPI 接口，使用 SQLite + MockLLM 完成端到端测试，并构造 40 条 business benchmark 验证业务语义、趋势分析、可视化和安全场景。
 
 如果要贴近实习经历：
 
@@ -627,7 +662,7 @@ python -m compileall -q sql_agent tests main.py
 
 ## 面试时主动展示什么
 
-重点展示 `/api/v1/question` 返回中的 `answer`、`semantic_plan`、`result`、`analysis`、`visualization` 和 `candidates` 字段：
+重点展示 `/api/v1/question` 返回中的 `answer`、`semantic_plan`、`result`、`analysis`、`visualization`、`candidates`、`agent_state` 和 `recovery` 字段：
 
 ```json
 {
@@ -635,6 +670,17 @@ python -m compileall -q sql_agent tests main.py
   "sql": "SELECT COUNT(*) AS cnt FROM employees",
   "status": "VALID",
   "confidence_score": 0.85,
+  "agent_state": {
+    "stage": "FINALIZE",
+    "status": "SUCCEEDED",
+    "recovery_attempts": 0,
+    "error": null
+  },
+  "recovery": {
+    "attempted": false,
+    "recovered": true,
+    "reason": "最佳候选已可用，无需恢复"
+  },
   "semantic_plan": {
     "intent": "metric_query",
     "metrics": ["employee_count"],

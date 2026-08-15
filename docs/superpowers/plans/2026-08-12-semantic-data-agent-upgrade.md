@@ -4,7 +4,7 @@
 
 **Goal:** 将当前 NL-to-SQL Agent 升级为具备轻量 Semantic Layer、反馈学习、评估闭环和可视化推荐的数据问答 Agent 原型。
 
-> 计划状态说明：该计划对应 Semantic Layer / Feedback / Evaluation / Visualization 1.0 迭代，已完成并在后续升级到 Data Agent 2.0。当前最新实现以 `docs/superpowers/plans/2026-08-13-data-agent-2-0-deepening.md`、`docs/iterations/2026-08-13-230519-data-agent-2-0-deepening.md` 和 `README.md` 为准。
+> 计划状态说明：该计划对应 Semantic Layer / Feedback / Evaluation / Visualization 1.0 迭代，已完成并在后续升级到 Data Agent 2.0、SQL AST safety、business benchmark、QuestionRuntime / AgentState、ToolRegistry 和 RecoveryLoop。当前最新实现以 `README.md`、`docs/project-highlights.md` 和最新 `docs/iterations/` 记录为准。
 
 **Architecture:** 新增 `semantic/`、`feedback/`、`visualization/` 三个聚焦模块，并扩展 `eval/` 与 `/api/v1/question`。请求链路先尝试基于语义模型生成 `SemanticQueryPlan` 和语义 SQL 候选，再合并 Agent 候选与 verified query 候选，最后统一走 CandidateRanker、ResultAnalyzer 和 VisualizationRecommender。
 

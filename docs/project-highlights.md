@@ -2,7 +2,7 @@
 
 ## 一句话定位
 
-这是一个参考 Dataherald 架构并结合 Data Agent 思路重构的轻量级企业数据问答 Agent 系统。它不是简单让 LLM 一次性生成 SQL，而是把 Semantic Layer 2.0、SemanticQueryPlan、数据库环境感知、工具调用、Schema Linking、多轮记忆、执行反馈自纠错、SQL AST 安全校验、候选 SQL 可解释排序、grounded 结果洞察、ECharts 可视化资产、反馈学习和可复现业务 Benchmark 串成一个可测试的工程闭环。
+这是一个参考 Dataherald 架构并结合 Data Agent 思路重构的轻量级企业数据问答 Agent 系统。它不是简单让 LLM 一次性生成 SQL，而是把 AgentState 状态机、Tool Registry、Recovery Loop、Semantic Layer 2.0、SemanticQueryPlan、数据库环境感知、工具调用、Schema Linking、多轮记忆、执行反馈自纠错、SQL AST 安全校验、候选 SQL 可解释排序、grounded 结果洞察、ECharts 可视化资产、反馈学习和可复现业务 Benchmark 串成一个可测试的工程闭环。
 
 ## 面试官容易眼前一亮的亮点
 
@@ -16,10 +16,12 @@
 - 复杂问题走 Plan-and-Solve，先分析表、JOIN、过滤、聚合和排序。
 - `AgentSelector` 根据问题复杂度自动选择执行路径。
 - 每一步工具调用都有中间步骤记录，方便调试和解释。
+- `/api/v1/question` 由 `QuestionRuntime` 编排，一次问答会经过 `LOAD_CONTEXT`、`PLAN_QUERY`、`GENERATE_SQL`、`RANK_CANDIDATES`、`RECOVER`、`ANALYZE_RESULT`、`FINALIZE` 等状态。
+- API 返回 `agent_state` 和 `recovery` 摘要，能说明当前请求是否完成、是否发生恢复以及恢复次数。
 
 面试表达：
 
-> 我没有把 Text-to-SQL 简单封成一次 LLM 调用，而是实现了一个可控 Agent loop。LLM 必须通过受控工具观察数据库，再基于 observation 继续推理，复杂问题则先规划再执行。
+> 我没有把 Text-to-SQL 简单封成一次 LLM 调用，而是实现了一个可控 Agent Runtime。一次请求会进入 AgentState 状态机，先加载上下文和 schema，再做语义计划、SQL 生成、候选执行排序、失败恢复和 grounded 分析。LLM 必须通过受控工具观察数据库，再基于 observation 继续推理，复杂问题则先规划再执行。
 
 ### 2. Schema 优先的数据环境感知
 
@@ -64,6 +66,7 @@
 - 拦截非 SELECT、多语句、未知表、未知列、歧义未限定列和危险函数。
 - 支持 alias、JOIN、CTE 和子查询作用域，避免复杂查询被简单 regex 误判。
 - `AgentToolkit.SqlDbQuery` 执行前强制校验。
+- 工具通过 `ToolRegistry` 声明式注册，保留工具分类、权限范围、安全要求、超时和参数说明。
 - `CandidateRanker` 对每条候选 SQL 附加 `safety` 报告，面试时可以展示为什么某条 SQL 被拒绝。
 - SQLite 的 `main/temp` 默认 schema 会规范化为裸表名，业务 benchmark 和工具层口径一致。
 
@@ -137,6 +140,8 @@
 面试表达：
 
 > 系统不会盲信第一条 SQL，而是对候选 SQL 做执行验证、结果形状校验和可解释排序。最终返回的不只是 SQL，还有候选分数、评分拆解、执行行数、结果列和选择依据，后续自然语言答案也只基于这份受控执行结果生成。
+
+`RecoveryLoop` 会在排序第一的候选不可用时，从后续候选中选择下一个真实执行成功的 SQL；如果全部失败，则返回结构化失败原因，而不是直接把错误 SQL 当答案返回。这让 Agent 具备最基础的“观察失败 -> 选择替代动作”的恢复能力。
 
 ### 9. Grounded 结果分析，不止返回 SQL
 
@@ -244,11 +249,11 @@
 
 ## 可以直接放进简历的描述
 
-> 基于 Dataherald 架构重构企业数据问答 Agent 原型，实现 Semantic Layer 2.0 与 SemanticQueryPlan 中间表示、原生 ReAct / Plan-and-Solve 双 Agent 路由、Schema Scanner/Linking、多轮会话记忆、DIN/DAIL 风格执行反馈自纠错、sqlglot AST 安全校验、多候选 SQL 执行验证与可解释排序、grounded 结果洞察、Feedback verified query 生命周期、可消费 ECharts 可视化资产和离线 Evaluation Benchmark。系统提供 FastAPI 接口，使用 SQLite + MockLLM 完成端到端测试，并构造 40 条 business benchmark 覆盖业务语义、趋势分析、可视化和安全场景。
+> 基于 Dataherald 架构重构企业数据问答 Agent 原型，实现 QuestionRuntime / AgentState 状态机编排、ToolRegistry 声明式工具治理、RecoveryLoop 失败恢复、Semantic Layer 2.0 与 SemanticQueryPlan 中间表示、原生 ReAct / Plan-and-Solve 双 Agent 路由、Schema Scanner/Linking、多轮会话记忆、DIN/DAIL 风格执行反馈自纠错、sqlglot AST 安全校验、多候选 SQL 执行验证与可解释排序、grounded 结果洞察、Feedback verified query 生命周期、可消费 ECharts 可视化资产和离线 Evaluation Benchmark。系统提供 FastAPI 接口，使用 SQLite + MockLLM 完成端到端测试，并构造 40 条 business benchmark 覆盖业务语义、趋势分析、可视化和安全场景。
 
 ## 面试时可以主动展示的接口返回
 
-重点展示 `/api/v1/question` 返回中的 `answer`、`semantic_plan`、`result`、`analysis`、`visualization` 和 `candidates` 字段：
+重点展示 `/api/v1/question` 返回中的 `answer`、`semantic_plan`、`result`、`analysis`、`visualization`、`candidates`、`agent_state` 和 `recovery` 字段：
 
 ```json
 {
