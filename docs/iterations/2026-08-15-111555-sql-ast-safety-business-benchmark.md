@@ -131,14 +131,14 @@ git diff --check
 
 ```text
 ruff: All checks passed
-pytest tests -q: 历史模块测试已通过；后续已删除外部服务测试。
+pytest tests -q: 历史模块测试已通过；真实 adapter 测试默认跳过。
 compileall: passed
 git diff --check: passed
 ```
 
 说明：
 
-- 后续清理迭代已删除外部服务测试，当前测试以 SQLite + MockLLM 原型链路为准。
+- 真实 adapter 测试默认跳过，当前测试以 SQLite + MockLLM 原型链路为准。
 - warnings 包含 FastAPI/TestClient 依赖组合的弃用提示，以及当前工作区 `.pytest_cache` 写入权限提示。
 - `git diff --check` 只提示 Windows 行尾转换 warning，不存在尾随空白错误。
 

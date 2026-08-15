@@ -91,9 +91,10 @@ flowchart TD
 
 ```mermaid
 flowchart TD
-    A["Business Benchmark SQLite + MockLLM"] --> B["API 端到端测试 MockLLM + 内存存储"]
-    B --> C["模块集成测试 SQL/JOIN/Schema/Conversation"]
-    C --> D["单元测试 数据模型/工具/纠错/评估"]
+    A["真实 adapter 测试 显式开启"] --> B["Business Benchmark SQLite + MockLLM"]
+    B --> C["API 端到端测试 MockLLM + 内存存储"]
+    C --> D["模块集成测试 SQL/JOIN/Schema/Conversation"]
+    D --> E["单元测试 数据模型/工具/纠错/评估"]
 ```
 
 ## 7. SemanticQueryPlan 编译链路

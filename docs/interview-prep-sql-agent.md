@@ -27,7 +27,7 @@
 
 更安全、也更像实习生真实经历的说法是：
 
-> 在神州数码实习期间，我参与了一个面向企业数据库问答的 Data Agent 原型项目，目标是降低业务人员写 SQL 和理解查询结果的门槛。我主要负责核心 NL-to-SQL / NL-to-data-answer Agent 链路的设计与实现，包括 Semantic Layer 业务语义治理、Schema 扫描、Agent 工具调用、多轮上下文、SQL 自纠错、候选 SQL 执行验证与可解释排序、基于执行结果的 grounded 洞察和 ECharts 可视化资产生成。项目以原型验证和内部 PoC 为主，默认使用 MockLLM、内存存储和 SQLite benchmark 保证本地可复现。
+> 在神州数码实习期间，我参与了一个面向企业数据库问答的 Data Agent 原型项目，目标是降低业务人员写 SQL 和理解查询结果的门槛。我主要负责核心 NL-to-SQL / NL-to-data-answer Agent 链路的设计与实现，包括 Semantic Layer 业务语义治理、Schema 扫描、Agent 工具调用、多轮上下文、SQL 自纠错、候选 SQL 执行验证与可解释排序、基于执行结果的 grounded 洞察和 ECharts 可视化资产生成。项目以原型验证和内部 PoC 为主，使用 SQLite benchmark 和 MockLLM 保证本地可复现，同时保留真实 adapter 接入能力。
 
 这样讲的好处：
 
@@ -355,7 +355,7 @@ DROP TABLE employees
 
 面试时可以说：
 
-> 我用 SQLite + MockLLM 做了端到端测试，这样核心链路不依赖外部服务也能稳定回归。当前项目已经删除外部服务集成测试，测试重点放在原型链路、SQL AST 安全和 business benchmark。
+> 我用 SQLite + MockLLM 做了端到端测试，这样核心链路不依赖外部服务也能稳定回归。同时保留真实 adapter 集成测试骨架，只有在显式配置外部服务环境时才运行。
 
 ## 3 天快速吃透计划
 
@@ -552,7 +552,7 @@ python -m compileall -q sql_agent tests main.py
 > 1. 复杂 SQL 的 alias、CTE、子查询列级白名单还比较保守。
 > 2. 候选 SQL 目前主要来自主输出和中间步骤，还没做多策略主动生成。
 > 3. LLM 结果分析当前主要校验 evidence 和数值可追溯性，复杂因果解释还需要更严格的结论类型约束。
-> 4. 当前是 MockLLM + SQLite benchmark 原型，不包含外部服务集成测试。
+> 4. 当前稳定测试路径是 MockLLM + SQLite benchmark，真实 adapter 测试需要显式配置外部服务环境。
 > 5. 还没有接 Langfuse 这类 Agent trace 系统。
 > 6. 权限控制已经有 AST 级表/列白名单和危险命令拦截，但生产化还需要数据库账号隔离、行列级权限、查询资源限制和审计。
 
@@ -597,7 +597,7 @@ python -m compileall -q sql_agent tests main.py
 
 回答：
 
-> IoC 方便在接口层替换真实模型、本地模型、内存存储或其他持久化/向量后端。当前业务代码依赖接口而不是具体 SDK，测试时用 MockLLM 和内存存储稳定复现。
+> IoC 方便在接口层替换真实模型、本地模型、内存存储或其他持久化/向量后端。业务代码依赖接口而不是具体 SDK，测试时用 MockLLM 和内存存储稳定复现，真实运行时通过环境变量切换 adapter。
 
 ### 16. 这个项目上线需要做什么？
 

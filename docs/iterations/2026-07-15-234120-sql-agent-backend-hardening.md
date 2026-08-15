@@ -57,8 +57,8 @@
    - 写入 `row_count`。
 
 8. 外部服务集成测试记录
-   - 该方向已在后续清理迭代中移除。
-   - 当前项目定位为可复现原型，默认使用 MockLLM、内存存储和 SQLite benchmark。
+   - 该方向已恢复为可选测试能力。
+   - 真实 adapter 测试默认跳过，稳定测试路径使用 MockLLM、内存存储和 SQLite。
 
 9. 代码清理
    - 移除 API 中旧的未使用 `_conversations` 全局字典。
@@ -77,12 +77,12 @@ pytest tests -q
 结果：
 
 ```text
-历史模块测试已通过；后续已删除外部服务测试。
+历史模块测试已通过；真实 adapter 测试默认跳过。
 ```
 
 说明：
 
-- 后续清理迭代已删除外部服务测试，当前测试以 SQLite + MockLLM 原型链路为准。
+- 真实 adapter 测试默认跳过，当前稳定测试以 SQLite + MockLLM 链路为准。
 - warnings 来自：
   - FastAPI TestClient 对当前 httpx/starlette 组合的弃用提示。
   - `.pytest_cache` 在当前工作区权限下无法写入 nodeids 的提示。
@@ -126,9 +126,9 @@ services/engine/dataherald/tests 属于原始参考子项目，不纳入当前�
 
 ## 剩余风险与后续建议
 
-1. 外部服务测试已在后续清理迭代中移除
-   - 原因：项目定位收敛为可复现原型，默认不访问外部服务。
-   - 当前建议执行：
+1. 真实 adapter 测试默认跳过
+   - 原因：默认不访问外部服务，避免凭据和网络状态影响本地测试。
+   - 当前建议执行稳定测试：
 
 ```powershell
 pytest tests -q

@@ -156,11 +156,11 @@ python -m compileall -q sql_agent tests main.py
 当前验证结果：
 
 ```text
-历史模块测试已通过；后续已删除外部服务测试。
+历史模块测试已通过；真实 adapter 测试默认跳过。
 compileall exit 0
 ```
 
-后续清理迭代已删除外部服务测试。当前测试重点收敛到 SQLite + MockLLM 原型链路；warnings 主要来自当前 FastAPI TestClient/httpx 组合的弃用提示，以及当前工作区 `.pytest_cache` 写入权限提示。
+真实 adapter 测试默认跳过。当前稳定测试重点是 SQLite + MockLLM 原型链路；warnings 主要来自当前 FastAPI TestClient/httpx 组合的弃用提示，以及当前工作区 `.pytest_cache` 写入权限提示。
 
 ## 实现效果
 

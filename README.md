@@ -110,7 +110,7 @@ ResultAnalyzer
 ```text
 sql_agent/
 ├── core/          # 数据模型、配置管理、IoC 容器
-├── llm/           # LLM 抽象层，原型默认使用本地 MockLLM
+├── llm/           # LLM 抽象层，支持真实 LLM adapter 和测试用 MockLLM
 ├── agent/         # Agent 框架，包括 ReAct、Plan-and-Solve 和自动选择器
 ├── context/       # 上下文管理，包括多轮对话、few-shot 检索和管理员指令
 ├── sql/           # 数据库层，包括 SQL 执行、Schema 扫描、Schema Linking、复杂 SQL 分解
@@ -121,7 +121,7 @@ sql_agent/
 ├── feedback/      # 用户反馈、verified query 和反馈学习闭环
 ├── visualization/ # 基于 SQL result 的图表推荐和可视化 spec
 ├── security/      # 基于 sqlglot AST 的 SQL 安全校验、表/列白名单和策略报告
-├── storage/       # 存储层，原型默认使用内存文档存储和内存向量检索
+├── storage/       # 存储层，包括文档存储和向量存储 adapter
 ├── eval/          # SQL 质量评估器、离线 benchmark 和 API case runner
 └── api/           # FastAPI REST 路由
 
@@ -170,7 +170,7 @@ services/          # Dataherald 原始多服务参考实现或源码镜像
 - `embed()`：生成文本 embedding。
 - `count_tokens()`：统计 token 数。
 
-当前默认实现是 `MockLLM`，用于让原型在没有外部模型服务的情况下稳定运行和测试。Agent、向量检索和评估器都通过 `LLMBackend` 接口调用模型，而不是直接依赖具体 SDK。
+当前默认实现是真实 LLM adapter，测试和本地端到端链路使用 `MockLLM` 保证稳定复现。Agent、向量检索和评估器都通过 `LLMBackend` 接口调用模型，而不是直接依赖具体 SDK。
 
 ### 4. Agent 推理层
 
@@ -401,8 +401,8 @@ Feedback 2.0 增强了结构化学习信号：
 # 1. 安装依赖
 pip install -r requirements.txt
 
-# 2. 可选配置环境变量
-# 默认使用 MockLLM + 内存存储 + SQLite benchmark，不需要外部服务凭据
+# 2. 配置环境变量
+# 本地测试可使用 MockLLM；真实运行需要配置对应 LLM 和存储后端环境变量
 
 # 3. 启动服务
 python main.py
@@ -443,9 +443,9 @@ pytest -q tests
 - SchemaScanner 列级样本值采集。
 - SQL 自纠错基础校验。
 - 启发式 SQL 质量评估。
-- SQLite + MockLLM 原型端到端测试。
+- SQLite + MockLLM 原型端到端测试，以及真实 adapter 集成测试骨架。
 
-当前本地测试结果以最新 `pytest tests -q` 输出为准。当前工作区 `.pytest_cache` 可能因为本机权限设置出现写入 warning，不影响功能断言。
+当前本地测试结果以最新 `pytest tests -q` 输出为准。真实 adapter 集成测试默认跳过，需要显式配置外部服务环境后运行；当前工作区 `.pytest_cache` 可能因为本机权限设置出现写入 warning，不影响功能断言。
 
 不建议直接运行：
 
@@ -466,7 +466,7 @@ pytest -q
 3. `LLMResultAnalyzer` 当前主要校验 evidence 和数值事实可追溯性，复杂自然语言因果解释仍应保持在 limitations 中，不能当成数据库外的事实判断。
 4. Semantic planner 当前是启发式匹配，SQL compiler 支持多指标、简单维度、默认过滤、Top-K、时间粒度和一跳关系 Join，但还不是完整语义 SQL 编译器。
 5. Verified query 召回使用轻量 token overlap，后续可以接更真实的语义召回；生命周期目前是数据结构和 API 层能力，还没有人工审核 UI。
-6. 当前默认使用 MockLLM、内存存储和 SQLite benchmark，定位是可复现原型，不是生产级外部服务集成平台。
+6. SQLite + MockLLM 是稳定测试路径；真实 LLM、文档存储和向量存储 adapter 已接入，但生产可用性仍取决于凭据、服务部署和权限治理。
 7. 全仓库测试仍可能受 `services/engine` 原始 Dataherald 子项目影响，建议默认只运行根目录重构版测试。
 
 这些边界不影响项目作为学习和展示 Agent 架构的价值，但在面试或简历中应如实表述为“原型系统”和“核心链路重构”，不要包装成完整生产级平台。
@@ -553,7 +553,7 @@ pytest -q
 - [x] 增加 SQLite + MockLLM 的 API 端到端测试。
 - [x] 为工具层表名、列名增加 schema 白名单校验。
 - [x] 完善 SchemaScanner 的样本值采集和列级上下文写入。
-- [x] 将默认运行链路收敛为 MockLLM、内存存储和 SQLite benchmark，不依赖外部服务。
+- [x] 增加真实 LLM、文档存储和向量存储 adapter 集成测试骨架。
 - [x] 增加候选 SQL 执行验证、证据化评分和排序。
 - [x] 将最优候选 SQL 的执行结果透出到 `/api/v1/question`。
 - [x] 增加启发式 `ResultAnalyzer`，生成稳定的 `answer`、`summary` 和 `key_findings`。

@@ -2,7 +2,7 @@
 LLM 后端抽象层。
 
 定义 LLM 服务提供方接口。
-当前原型默认使用本地 MockLLM，并保留接口以便后续替换模型实现。
+当前支持 OpenAI、Azure OpenAI，并可扩展到其他模型服务。
 """
 
 from __future__ import annotations

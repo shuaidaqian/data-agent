@@ -8,9 +8,9 @@
 
 因此我抽取核心链路，重构了一个轻量级 SQL Agent / Data Agent 原型。整体链路是：FastAPI 接收问题，构造 Prompt 和 Conversation；SchemaScanner 扫描数据库表、列、主键、外键和样本值；Semantic Layer 命中指标、维度、时间粒度、默认过滤条件和认证状态，生成 SemanticQueryPlan 并编译语义 SQL 候选；ContextRetriever 检索 Golden SQL few-shot 示例和管理员指令；FeedbackService 召回 verified query；AgentSelector 根据问题复杂度选择 ReActAgent 或 PlanSolveAgent；Agent 通过 AgentToolkit 调用查表、取 schema、检查实体值、执行 SQL 等工具；生成 SQL 后再进入 DAIL 或 DIN 风格自纠错；最后 CandidateRanker 对 semantic SQL、verified query 和 Agent SQL 做执行验证、结果形状校验和可解释排序，ResultAnalyzer 基于最优 SQL result 生成 grounded 洞察，VisualizationRecommender 输出 ECharts 可视化资产。
 
-项目里我比较重视可替换架构，所以实现了一个 IoC 容器，LLM、存储、向量库、上下文和评估器都通过接口注入。当前原型默认使用 MockLLM、内存存储和 SQLite benchmark，后续替换真实模型或持久化后端时不需要改业务主链路。
+项目里我比较重视可替换架构，所以实现了一个 IoC 容器，LLM、存储、向量库、上下文和评估器都通过接口注入。真实 adapter 可以通过环境变量接入，测试链路用 MockLLM、内存存储和 SQLite benchmark 保证稳定，不需要改业务主链路。
 
-测试方面，我用 pytest 做了分层测试：底层有数据模型、SQL 执行、schema 扫描、schema linking、SQL AST safety 和 business benchmark 测试；中间有 Agent 工具、自纠错、Semantic Layer、CandidateRanker、ResultAnalyzer、Visualization 和 Evaluation Benchmark 测试；上层有 API 端到端测试，并用内存存储、内存向量检索和 MockLLM 隔离外部依赖。当前测试重点是 SQLite + MockLLM 原型链路，不包含外部服务集成测试。
+测试方面，我用 pytest 做了分层测试：底层有数据模型、SQL 执行、schema 扫描、schema linking、SQL AST safety 和 business benchmark 测试；中间有 Agent 工具、自纠错、Semantic Layer、CandidateRanker、ResultAnalyzer、Visualization 和 Evaluation Benchmark 测试；上层有 API 端到端测试，并用内存存储、内存向量检索和 MockLLM 隔离外部依赖。真实 adapter 集成测试默认跳过，需要显式配置环境才运行。
 
 这个项目目前定位是核心 Agent 引擎重构原型，不是完整生产平台。后续如果继续做，我会优先把现有 SQL AST 安全校验升级为更完整的权限和审计体系，补充 schema 大规模压缩、真实评测集、Langfuse 链路追踪和更多数据库方言测试。
 
@@ -31,7 +31,7 @@
 13. Semantic Layer 2.0：指标治理、时间粒度、多指标、Join、歧义澄清。
 14. CandidateRanker / ResultAnalyzer / Visualization：可解释决策、grounded 洞察、ECharts 资产。
 15. Feedback + Evaluation：verified query 生命周期、错误归因、benchmark。
-16. Testing：MockLLM、内存组件、端到端测试、business benchmark。
+16. Testing：MockLLM、内存组件、端到端测试、business benchmark、真实 adapter skip 策略。
 17. 风险：SQL 安全、LLM 幻觉、schema 过大、外键缺失、语义模型误维护。
 18. 后续：SQL AST、观测、评测、安全、模型适配。
 
@@ -97,9 +97,9 @@ LLM 本身不知道数据库有哪些表和列。如果直接让它生成 SQL，
 
 真实外部模型不稳定、成本高、速度慢，而且输出不确定。端到端测试的目标是验证系统链路，不是验证外部模型能力，所以用 MockLLM 可以稳定触发预期路径。
 
-### Q16：为什么删除外部服务集成测试？
+### Q16：真实 adapter 测试为什么默认 skip？
 
-当前项目定位是可复现原型，核心价值在 SQL Agent 链路、SQLite benchmark、SQL AST 安全和 grounded 分析。外部服务会引入凭据、网络和环境不确定性，反而干扰原型验证，所以删除外部服务测试，保留可替换接口。
+真实 adapter 依赖外部凭据、网络和服务状态。默认 skip 可以保证本地和 CI 的稳定性；当需要验证真实环境时，再显式打开对应环境变量运行这些测试。
 
 ### Q17：如果 schema 有 1000 张表怎么办？
 

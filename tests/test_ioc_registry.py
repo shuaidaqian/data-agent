@@ -22,13 +22,13 @@ def test_ioc_can_instantiate_configured_core_components(monkeypatch):
     assert system.instance(Evaluator).__class__.__name__ == "SimpleEvaluator"
 
 
-def test_ioc_defaults_use_local_prototype_components(monkeypatch):
+def test_ioc_defaults_point_to_real_adapters(monkeypatch):
     monkeypatch.delenv("LLM_BACKEND", raising=False)
     monkeypatch.delenv("STORAGE_BACKEND", raising=False)
     monkeypatch.delenv("VECTOR_BACKEND", raising=False)
 
-    system = System(Settings())
+    settings = Settings()
 
-    assert system.instance(LLMBackend).__class__.__name__ == "MockLLM"
-    assert system.instance(StorageBackend).__class__.__name__ == "InMemoryStorageBackend"
-    assert system.instance(VectorBackend).__class__.__name__ == "InMemoryVectorStore"
+    assert settings.llm_backend == "sql_agent.llm.openai_llm.OpenAILLM"
+    assert settings.storage_backend == "sql_agent.storage.db.MongoStorage"
+    assert settings.vector_backend == "sql_agent.storage.vector.ChromaVectorStore"

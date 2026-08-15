@@ -188,7 +188,7 @@
 
 面试表达：
 
-> 我把 LLM、存储、向量库、上下文检索和评估器都抽象成可替换组件，业务代码依赖接口而不是具体 SDK。当前原型默认使用 MockLLM、内存存储和 SQLite benchmark，后续需要时再替换为真实模型或持久化后端。
+> 我把 LLM、存储、向量库、上下文检索和评估器都抽象成可替换组件，业务代码依赖接口而不是具体 SDK。真实 adapter 可以通过环境变量接入，测试链路使用 MockLLM、内存存储和 SQLite benchmark 保持稳定。
 
 ### 12. 测试覆盖不是摆设
 
@@ -212,7 +212,7 @@
 - business SQLite benchmark 数据集和 40 条业务评估样例。
 - 自纠错。
 - Evaluator。
-- SQLite + MockLLM 原型端到端测试。
+- SQLite + MockLLM 原型端到端测试，以及真实 adapter 集成测试骨架。
 
 最新验证结果以本地 `pytest tests -q` 为准；当前完整模块验证覆盖根目录重构版测试、business benchmark、SQL AST safety、工具层、候选排序和评估 Harness。
 

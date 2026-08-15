@@ -671,7 +671,7 @@ pytest -q tests/test_correction.py tests/test_evaluator.py tests/test_eval_harne
 - `EvaluationHarness` 如何计算 valid rate、execution accuracy、grounding rate？
 - `error_breakdown` 如何帮助定位回归？
 - API benchmark runner 为什么要和模块级 harness 分开？
-- 为什么原型阶段不保留外部服务集成测试？
+- 为什么真实 adapter 集成测试默认 skip？
 - 如何解释 MockLLM + SQLite benchmark 的测试价值？
 - 面试官问“如何评估 NL->SQL 准确率”，你会提出哪些指标？
 

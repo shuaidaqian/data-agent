@@ -3,7 +3,7 @@
 这个目录用于把“两周吃透 SQL Agent 项目学习计划”落地成可执行资料。目标不是泛泛读代码，而是围绕面试深挖建立四类能力：
 
 - 能画清楚系统链路：用户问题如何经过 API、Semantic Layer、Context、Schema、Agent、Tools、Correction、CandidateRanker、ResultAnalyzer 和 Visualization 最终变成可追溯数据答案。
-- 能讲清楚技术选型：FastAPI、Pydantic、SQLAlchemy、MockLLM、内存存储、SQLite benchmark、pytest 分别解决什么问题。
+- 能讲清楚技术选型：FastAPI、Pydantic、SQLAlchemy、真实 LLM adapter、文档存储、向量存储、SQLite benchmark、pytest 分别解决什么问题。
 - 能解释源码细节：核心类、核心函数、数据流、错误处理、测试策略。
 - 能经受追问：能坦诚说明项目边界、风险、改进方向，而不是只背 README。
 - 能解释 2.0 深化能力：Semantic Layer 业务语义治理、verified query 学习、候选 SQL 可解释排序、grounded 洞察、ECharts 可视化资产和 Evaluation Benchmark。
@@ -57,4 +57,4 @@ pytest -q tests
 以最新 `pytest -q tests` 输出为准
 ```
 
-当前原型已删除外部服务集成测试，测试重点是 SQLite + MockLLM 端到端链路和 business benchmark。
+真实 adapter 集成测试默认跳过，需要显式配置环境才运行；稳定测试重点是 SQLite + MockLLM 端到端链路和 business benchmark。

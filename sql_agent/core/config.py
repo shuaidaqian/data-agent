@@ -21,9 +21,9 @@ _COMPONENT_REGISTRY: Dict[str, str] = {
     "sql_agent.eval.evaluator.Evaluator": "EVALUATOR",
 }
 _DEFAULT_IMPLS: Dict[str, str] = {
-    "sql_agent.llm.base.LLMBackend": "sql_agent.llm.mock_llm.MockLLM",
-    "sql_agent.storage.db.StorageBackend": "sql_agent.storage.db.InMemoryStorageBackend",
-    "sql_agent.storage.vector.VectorBackend": "sql_agent.storage.vector.InMemoryVectorStore",
+    "sql_agent.llm.base.LLMBackend": "sql_agent.llm.openai_llm.OpenAILLM",
+    "sql_agent.storage.db.StorageBackend": "sql_agent.storage.db.MongoStorage",
+    "sql_agent.storage.vector.VectorBackend": "sql_agent.storage.vector.ChromaVectorStore",
     "sql_agent.context.base.ContextStore": "sql_agent.context.base.DefaultContextStore",
     "sql_agent.eval.evaluator.Evaluator": "sql_agent.eval.evaluator.SimpleEvaluator",
 }
@@ -65,8 +65,16 @@ class Settings:
     def __init__(self):
         self.project_name = os_module.getenv("PROJECT_NAME", "SQL Agent")
         self.debug = os_module.getenv("DEBUG", "false").lower() == "true"
-        self.llm_model = os_module.getenv("LLM_MODEL", "mock-local")
+        self.openai_api_key = os_module.getenv("OPENAI_API_KEY")
+        self.llm_model = os_module.getenv("LLM_MODEL", "gpt-4o")
         self.llm_temperature = float(os_module.getenv("LLM_TEMPERATURE", "0.0"))
+        self.azure_api_key = os_module.getenv("AZURE_API_KEY")
+        self.azure_endpoint = os_module.getenv("AZURE_OPENAI_ENDPOINT")
+        self.azure_api_version = os_module.getenv("AZURE_OPENAI_API_VERSION", "2024-02-01")
+        self.db_uri = os_module.getenv("MONGODB_URI")
+        self.db_name = os_module.getenv("MONGODB_DB_NAME", "sql_agent")
+        self.embedding_model = os_module.getenv("EMBEDDING_MODEL", "text-embedding-3-large")
+        self.chroma_persist_dir = os_module.getenv("CHROMA_PERSIST_DIR", "./chroma_db")
         self.agent_mode = os_module.getenv("AGENT_MODE", "auto")
         self.agent_max_iterations = int(os_module.getenv("AGENT_MAX_ITERATIONS", "15"))
         self.engine_timeout = int(os_module.getenv("DH_ENGINE_TIMEOUT", "150"))
@@ -77,12 +85,12 @@ class Settings:
         self.max_correction_rounds = int(os_module.getenv("MAX_CORRECTION_ROUNDS", "3"))
         self.result_analyzer = os_module.getenv("RESULT_ANALYZER", "heuristic").lower()
         self.semantic_model_path = os_module.getenv("SEMANTIC_MODEL_PATH")
-        self.llm_backend = os_module.getenv("LLM_BACKEND", "sql_agent.llm.mock_llm.MockLLM")
+        self.llm_backend = os_module.getenv("LLM_BACKEND", "sql_agent.llm.openai_llm.OpenAILLM")
         self.storage_backend = os_module.getenv(
-            "STORAGE_BACKEND", "sql_agent.storage.db.InMemoryStorageBackend"
+            "STORAGE_BACKEND", "sql_agent.storage.db.MongoStorage"
         )
         self.vector_backend = os_module.getenv(
-            "VECTOR_BACKEND", "sql_agent.storage.vector.InMemoryVectorStore"
+            "VECTOR_BACKEND", "sql_agent.storage.vector.ChromaVectorStore"
         )
         self.context_store = os_module.getenv(
             "CONTEXT_STORE", "sql_agent.context.base.DefaultContextStore"

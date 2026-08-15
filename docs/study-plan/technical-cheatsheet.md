@@ -12,10 +12,10 @@
 | Pydantic | 定义 API 请求和响应模型 | 让 HTTP 输入输出有结构和校验 |
 | dataclass | 定义内部核心数据对象 | 适合轻量数据容器，比 dict 更清晰 |
 | SQLAlchemy | 数据库连接、执行 SQL、inspect schema | 屏蔽不同数据库差异，支持 engine 和 inspector |
-| MockLLM | 本地原型 LLM 替身 | 不依赖外部模型服务，保证端到端测试稳定 |
-| InMemoryVectorStore | Golden SQL 轻量检索 | 根据用户问题召回相似 few-shot 示例 |
-| InMemoryStorageBackend | 文档存储 | 保存连接、Golden SQL、表描述、指令等结构化记录 |
-| pytest | 单元测试、模块测试、端到端测试 | fake 组件隔离外部依赖，重点验证 SQLite + benchmark 原型链路 |
+| OpenAI SDK | 真实 LLM adapter | 通过 `LLMBackend` 抽象，业务层不直接依赖 SDK |
+| ChromaDB | Golden SQL 向量检索 adapter | 根据用户问题召回相似 few-shot 示例 |
+| MongoDB | 文档存储 adapter | 保存连接、Golden SQL、表描述、指令等结构化记录 |
+| pytest | 单元测试、模块测试、端到端测试 | MockLLM + SQLite 稳定回归，真实 adapter 测试默认跳过 |
 | sqlglot | SQL AST 解析和安全校验 | 解析 alias、CTE、子查询作用域，做表/列白名单和只读策略校验 |
 
 ## 3. 主链路
@@ -287,7 +287,7 @@ Evaluation：
 | 外键缺失 | JOIN 路径找不到 | 业务关系配置、历史 SQL 学习 |
 | SQL 安全 | LLM 可能生成危险 SQL | 只读账号、白名单、AST 解析、审计日志 |
 | 执行反馈误导 | 0 行不一定错误 | 结合语义检查和样本统计 |
-| 外部服务不稳定 | 原型阶段不依赖外部服务 | MockLLM + 内存存储 + SQLite benchmark |
+| 真实服务不稳定 | 真实 LLM / 存储 / 向量库依赖环境 | MockLLM + SQLite 稳定测试，真实 adapter 测试显式开启 |
 | 语义模型误维护 | 指标口径如果配置错，SQL 会稳定地错 | owner/certified、审核流、benchmark 回归 |
 | 候选排序误判 | 真实执行成功但语义仍可能错 | golden benchmark、verified query、LLM evaluator、人工反馈 |
 | 结果分析过度解释 | 相关性结果被说成因果 | finding type、why limitation、grounding 校验 |

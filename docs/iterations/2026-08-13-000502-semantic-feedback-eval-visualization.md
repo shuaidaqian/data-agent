@@ -108,7 +108,7 @@ pytest tests/test_semantic_layer.py tests/test_feedback.py tests/test_visualizat
 22 passed, 2 warnings
 
 pytest tests -q
-历史模块测试已通过；后续已删除外部服务测试。
+历史模块测试已通过；真实 adapter 测试默认跳过。
 
 python -m compileall -q sql_agent tests main.py
 exit 0

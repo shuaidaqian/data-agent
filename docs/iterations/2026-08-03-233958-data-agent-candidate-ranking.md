@@ -99,7 +99,7 @@ pytest tests -q
 结果：
 
 ```text
-历史模块测试已通过；后续已删除外部服务测试。
+历史模块测试已通过；真实 adapter 测试默认跳过。
 ```
 
 语法编译检查：
@@ -112,7 +112,7 @@ python -m compileall -q sql_agent tests main.py
 
 说明：
 
-- 后续清理迭代已删除外部服务测试，测试重点收敛到 SQLite + MockLLM 原型链路。
+- 真实 adapter 测试默认跳过，稳定测试重点是 SQLite + MockLLM 原型链路。
 - warnings 仍来自 FastAPI TestClient/httpx 组合弃用提示和 `.pytest_cache` 写入权限提示。
 
 ## 效果分析
